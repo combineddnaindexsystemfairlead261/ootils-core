@@ -1,179 +1,242 @@
-"""Supply chain data models."""
+"""
+Domain models for the Ootils planning engine.
+These are pure Python dataclasses — no ORM, no DB coupling.
+All field types are explicit (no JSONB blobs).
+"""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Optional
+from uuid import UUID, uuid4
+
+
+# ---------------------------------------------------------------------------
+# Core domain entities
+# ---------------------------------------------------------------------------
 
 
 @dataclass
-class Product:
-    """Represents a product in the supply chain.
-
-    Attributes:
-        sku: Stock Keeping Unit identifier.
-        name: Human-readable product name.
-        unit_cost: Cost per unit (purchase price).
-        holding_cost_rate: Annual holding cost as a fraction of unit cost (e.g. 0.25 = 25%).
-        ordering_cost: Fixed cost per purchase order placed.
-        service_level: Desired probability of not running out of stock (0–1).
-        lead_time_days: Average supplier lead time in days (can be overridden per supplier).
-        lead_time_std_days: Standard deviation of lead time in days (for safety stock).
-    """
-
-    sku: str
+class Scenario:
+    scenario_id: UUID
     name: str
-    unit_cost: float
-    holding_cost_rate: float = 0.25
-    ordering_cost: float = 50.0
-    service_level: float = 0.95
-    lead_time_days: float = 14.0
-    lead_time_std_days: float = 2.0
+    description: Optional[str] = None
+    parent_scenario_id: Optional[UUID] = None
+    is_baseline: bool = False
+    baseline_snapshot_id: Optional[UUID] = None
+    status: str = "active"
+    as_of_date: Optional[date] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    def __post_init__(self) -> None:
-        if self.unit_cost <= 0:
-            raise ValueError(f"unit_cost must be positive, got {self.unit_cost}")
-        if not 0 < self.holding_cost_rate <= 1:
-            raise ValueError(f"holding_cost_rate must be in (0, 1], got {self.holding_cost_rate}")
-        if self.ordering_cost < 0:
-            raise ValueError(f"ordering_cost must be non-negative, got {self.ordering_cost}")
-        if not 0 < self.service_level < 1:
-            raise ValueError(f"service_level must be in (0, 1), got {self.service_level}")
-        if self.lead_time_days < 0:
-            raise ValueError(f"lead_time_days must be non-negative, got {self.lead_time_days}")
-        if self.lead_time_std_days < 0:
-            raise ValueError(
-                f"lead_time_std_days must be non-negative, got {self.lead_time_std_days}"
-            )
-
-    @property
-    def annual_holding_cost_per_unit(self) -> float:
-        """Annual holding cost per unit (currency)."""
-        return self.unit_cost * self.holding_cost_rate
+    # Sentinel baseline UUID (matches the seeded row in migration)
+    BASELINE_ID: UUID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 @dataclass
-class Supplier:
-    """Represents a supplier in the supply chain.
-
-    Attributes:
-        name: Supplier name.
-        lead_time_days: Average delivery lead time in calendar days.
-        lead_time_std_days: Standard deviation of lead time in days.
-        reliability_score: Historical on-time delivery rate (0–1).
-        unit_price_multiplier: Price relative to base ``Product.unit_cost`` (e.g. 1.1 = 10% premium).
-        min_order_quantity: Minimum order quantity enforced by the supplier.
-        max_order_quantity: Maximum order quantity the supplier can fulfil (None = unlimited).
-        active: Whether this supplier is currently available for ordering.
-    """
-
+class Item:
+    item_id: UUID
     name: str
-    lead_time_days: float
-    lead_time_std_days: float = 2.0
-    reliability_score: float = 1.0
-    unit_price_multiplier: float = 1.0
-    min_order_quantity: int = 1
-    max_order_quantity: Optional[int] = None
+    item_type: str = "finished_good"
+    uom: str = "EA"
+    status: str = "active"
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class Location:
+    location_id: UUID
+    name: str
+    location_type: str = "dc"
+    country: Optional[str] = None
+    timezone: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class Node:
+    node_id: UUID
+    node_type: str
+    scenario_id: UUID
+    item_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
+
+    # Quantity
+    quantity: Optional[Decimal] = None
+    qty_uom: Optional[str] = None
+
+    # Temporal fields
+    time_grain: Optional[str] = None
+    time_ref: Optional[date] = None
+    time_span_start: Optional[date] = None
+    time_span_end: Optional[date] = None
+
+    # Engine state
+    is_dirty: bool = False
+    last_calc_run_id: Optional[UUID] = None
     active: bool = True
 
-    def __post_init__(self) -> None:
-        if self.lead_time_days < 0:
-            raise ValueError(f"lead_time_days must be non-negative, got {self.lead_time_days}")
-        if not 0 <= self.reliability_score <= 1:
-            raise ValueError(
-                f"reliability_score must be in [0, 1], got {self.reliability_score}"
-            )
-        if self.unit_price_multiplier <= 0:
-            raise ValueError(
-                f"unit_price_multiplier must be positive, got {self.unit_price_multiplier}"
-            )
-        if self.min_order_quantity < 1:
-            raise ValueError(
-                f"min_order_quantity must be >= 1, got {self.min_order_quantity}"
-            )
-        if self.max_order_quantity is not None and self.max_order_quantity < self.min_order_quantity:
-            raise ValueError(
-                "max_order_quantity must be >= min_order_quantity, "
-                f"got {self.max_order_quantity} < {self.min_order_quantity}"
-            )
+    # PI-specific
+    projection_series_id: Optional[UUID] = None
+    bucket_sequence: Optional[int] = None
 
-    def effective_unit_cost(self, base_unit_cost: float) -> float:
-        """Return the actual unit purchase price from this supplier."""
-        return base_unit_cost * self.unit_price_multiplier
+    # PI computation results
+    opening_stock: Optional[Decimal] = None
+    inflows: Optional[Decimal] = None
+    outflows: Optional[Decimal] = None
+    closing_stock: Optional[Decimal] = None
+    has_shortage: bool = False
+    shortage_qty: Decimal = Decimal("0")
 
-    def clamp_quantity(self, quantity: int) -> int:
-        """Clamp *quantity* to this supplier's min/max order constraints."""
-        clamped = max(quantity, self.min_order_quantity)
-        if self.max_order_quantity is not None:
-            clamped = min(clamped, self.max_order_quantity)
-        return clamped
+    # Grain mix tracking
+    has_exact_date_inputs: bool = False
+    has_week_inputs: bool = False
+    has_month_inputs: bool = False
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# Typed node subclasses for clarity in type hints
+ProjectedInventoryNode = Node  # node_type == 'ProjectedInventory'
+PurchaseOrderNode = Node       # node_type == 'PurchaseOrderSupply'
+OnHandNode = Node              # node_type == 'OnHandSupply'
 
 
 @dataclass
-class InventoryState:
-    """Snapshot of the current inventory situation for a single product.
-
-    Attributes:
-        product: The product this state refers to.
-        current_stock: Units currently on hand.
-        daily_demand: Average daily demand (units/day).
-        demand_std_daily: Standard deviation of daily demand.
-        open_order_quantity: Units already on order but not yet received.
-        days_of_supply: Calculated as ``current_stock / daily_demand`` (read-only).
-    """
-
-    product: Product
-    current_stock: float
-    daily_demand: float
-    demand_std_daily: float = 0.0
-    open_order_quantity: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.current_stock < 0:
-            raise ValueError(f"current_stock must be non-negative, got {self.current_stock}")
-        if self.daily_demand < 0:
-            raise ValueError(f"daily_demand must be non-negative, got {self.daily_demand}")
-        if self.demand_std_daily < 0:
-            raise ValueError(
-                f"demand_std_daily must be non-negative, got {self.demand_std_daily}"
-            )
-        if self.open_order_quantity < 0:
-            raise ValueError(
-                f"open_order_quantity must be non-negative, got {self.open_order_quantity}"
-            )
-
-    @property
-    def days_of_supply(self) -> float:
-        """Estimated days until stock-out, excluding open orders."""
-        if self.daily_demand == 0:
-            return float("inf")
-        return self.current_stock / self.daily_demand
-
-    @property
-    def effective_stock(self) -> float:
-        """Current stock plus any open orders in transit."""
-        return self.current_stock + self.open_order_quantity
+class Edge:
+    edge_id: UUID
+    edge_type: str
+    from_node_id: UUID
+    to_node_id: UUID
+    scenario_id: UUID
+    priority: int = 0
+    weight_ratio: Decimal = Decimal("1.0")
+    effective_start: Optional[date] = None
+    effective_end: Optional[date] = None
+    active: bool = True
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
-class OrderRecommendation:
-    """A recommended purchase order produced by the decision engine.
+class ProjectionSeries:
+    series_id: UUID
+    item_id: UUID
+    location_id: UUID
+    scenario_id: UUID
+    horizon_start: date
+    horizon_end: date
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    Attributes:
-        product: The product to order.
-        supplier: The recommended supplier.
-        order_quantity: Recommended number of units to order.
-        reorder_point: Inventory level that triggered or will trigger the recommendation.
-        safety_stock: Calculated safety stock buffer.
-        economic_order_quantity: Optimal order size before supplier constraints.
-        rationale: Human- and agent-readable explanation of the decision.
-        urgency: One of ``"critical"``, ``"high"``, ``"medium"``, or ``"low"``.
-    """
 
-    product: Product
-    supplier: Supplier
-    order_quantity: int
-    reorder_point: float
-    safety_stock: float
-    economic_order_quantity: float
-    rationale: str
-    urgency: str
-    metadata: dict = field(default_factory=dict)
+@dataclass
+class NodeTypeTemporalPolicy:
+    policy_id: UUID
+    node_type: str
+    zone1_grain: str = "day"
+    zone1_end_days: int = 90
+    zone2_grain: str = "week"
+    zone2_end_days: int = 180
+    zone3_grain: str = "month"
+    week_start_dow: int = 0  # 0 = Monday
+    active: bool = True
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CalcRun:
+    calc_run_id: UUID
+    scenario_id: UUID
+    triggered_by_event_ids: list[UUID] = field(default_factory=list)
+    is_full_recompute: bool = False
+    dirty_node_count: Optional[int] = None
+    nodes_recalculated: int = 0
+    nodes_unchanged: int = 0
+    status: str = "pending"  # pending | running | completed | completed_stale | failed
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class PlanningEvent:
+    event_id: UUID
+    event_type: str
+    scenario_id: UUID
+    trigger_node_id: Optional[UUID] = None
+    field_changed: Optional[str] = None
+    old_date: Optional[date] = None
+    new_date: Optional[date] = None
+    old_quantity: Optional[Decimal] = None
+    new_quantity: Optional[Decimal] = None
+    old_text: Optional[str] = None
+    new_text: Optional[str] = None
+    processed: bool = False
+    processed_at: Optional[datetime] = None
+    source: str = "api"
+    user_ref: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Projection kernel DTOs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SupplyEvent:
+    """A supply contribution (PO, WO, Transfer) relevant to a PI bucket."""
+    node_id: UUID
+    node_type: str
+    quantity: Decimal
+    time_ref: date          # exact date of supply
+    time_grain: str = "exact_date"
+
+
+@dataclass
+class DemandEvent:
+    """A demand contribution (forecast, customer order) relevant to a PI bucket."""
+    node_id: UUID
+    node_type: str
+    quantity: Decimal
+    time_ref: Optional[date] = None
+    time_span_start: Optional[date] = None
+    time_span_end: Optional[date] = None
+    time_grain: str = "exact_date"
+
+
+@dataclass
+class ProjectedInventoryResult:
+    """Output of ProjectionKernel.compute_pi_node — pure computation result."""
+    opening_stock: Decimal
+    inflows: Decimal
+    outflows: Decimal
+    closing_stock: Decimal
+    has_shortage: bool
+    shortage_qty: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class CycleDetectedError(Exception):
+    """Raised when inserting an edge would create a cycle in the planning graph."""
+    def __init__(self, from_id: UUID, to_id: UUID, scenario_id: UUID):
+        self.from_id = from_id
+        self.to_id = to_id
+        self.scenario_id = scenario_id
+        super().__init__(
+            f"Adding edge {from_id} → {to_id} in scenario {scenario_id} would create a cycle"
+        )
+
+
+class EngineStartupError(Exception):
+    """Raised by startup_cycle_check if the graph has a cycle."""
+    pass
