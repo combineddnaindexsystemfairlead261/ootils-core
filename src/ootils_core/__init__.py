@@ -19,7 +19,6 @@ Quick start::
     print(decision)
 """
 
-from ootils_core.engine.decision_engine import SupplyChainDecisionEngine
-
-__all__ = ["SupplyChainDecisionEngine"]
 __version__ = "0.1.0"
+__all__: list = []
+
