@@ -125,4 +125,38 @@ Reference model: dbt, Airbyte, Grafana — open core, business in the cloud/serv
 
 ---
 
+## Timeline & Constraints
+
+**Current situation:**
+- Nico remains at current company for ~12 months (retention bonus)
+- Ootils is fully segregated: independent code, no client data, private GitHub repo
+- IT genius (France) is aware of the vision, not formally involved yet
+- Key client (325 DCs × 5,000 SKUs, daily data feeds) identified as first POC — not yet approached
+
+**The 12-month window:**
+
+```
+Now → M6                  M6 → M12                M12+
+─────────────────         ─────────────────       ──────────────────
+Build the engine          Build first agents      Clean exit
+Complete PoA              Informal market         IT genius joins
+Solid architecture        validation              Client POC starts
+Full documentation        (conversations,         Legal structure
+                          no formal sales)        Funding?
+```
+
+**Key rules during the 12 months:**
+- Never run Ootils on current employer's infrastructure
+- Never use client data for development or testing
+- No formal involvement of IT genius while he is employed
+- No pitching Ootils to the client while still at current company
+- PoA runs on synthetic data only — keep it that way
+
+**The retention bonus = initial Ootils funding. Protect it.**
+
+**Primary risk:** Being overtaken by a well-funded competitor during these 12 months.  
+**Mitigation:** Speed on the engine + selective public presence at the right moment (GitHub public core to plant a technical credibility flag — timing TBD).
+
+---
+
 *This document captures strategic thinking as of 2026-04-04. Revisit quarterly or on major milestone completion.*
