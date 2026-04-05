@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS node_type_policies (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    UNIQUE (node_type, active) DEFERRABLE INITIALLY DEFERRED  -- only one active policy per node_type
+    UNIQUE (node_type, active)  -- only one active policy per node_type
 );
 
 -- Seed: default ProjectedInventory temporal policy
