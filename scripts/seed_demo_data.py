@@ -127,7 +127,7 @@ def seed(conn):
     event_id = _uid("event:ingestion_complete:seed-v1")
     conn.execute("""
         INSERT INTO events (event_id, event_type, scenario_id, source)
-        VALUES (%s, 'ingestion_complete', %s, 'seed_script')
+        VALUES (%s, 'ingestion_complete', %s, 'test')
         ON CONFLICT DO NOTHING
     """, (event_id, BASELINE_SCENARIO_ID))
     print("  ✓ Trigger event inserted")
@@ -174,16 +174,17 @@ def _seed_pi_nodes_pump_atl(conn, item_id, location_id, series_id):
         ))
         running = closing
 
-    conn.executemany("""
-        INSERT INTO nodes (
-            node_id, node_type, scenario_id, item_id, location_id,
-            time_grain, time_ref, time_span_start, time_span_end,
-            is_dirty, active, projection_series_id, bucket_sequence,
-            opening_stock, inflows, outflows, closing_stock,
-            has_shortage, shortage_qty
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT DO NOTHING
-    """, nodes)
+    with conn.cursor() as cur:
+        cur.executemany("""
+            INSERT INTO nodes (
+                node_id, node_type, scenario_id, item_id, location_id,
+                time_grain, time_ref, time_span_start, time_span_end,
+                is_dirty, active, projection_series_id, bucket_sequence,
+                opening_stock, inflows, outflows, closing_stock,
+                has_shortage, shortage_qty
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, nodes)
 
 
 def _seed_pi_nodes_valve_lax(conn, item_id, location_id, series_id):
@@ -219,16 +220,17 @@ def _seed_pi_nodes_valve_lax(conn, item_id, location_id, series_id):
         ))
         running = closing
 
-    conn.executemany("""
-        INSERT INTO nodes (
-            node_id, node_type, scenario_id, item_id, location_id,
-            time_grain, time_ref, time_span_start, time_span_end,
-            is_dirty, active, projection_series_id, bucket_sequence,
-            opening_stock, inflows, outflows, closing_stock,
-            has_shortage, shortage_qty
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT DO NOTHING
-    """, nodes)
+    with conn.cursor() as cur:
+        cur.executemany("""
+            INSERT INTO nodes (
+                node_id, node_type, scenario_id, item_id, location_id,
+                time_grain, time_ref, time_span_start, time_span_end,
+                is_dirty, active, projection_series_id, bucket_sequence,
+                opening_stock, inflows, outflows, closing_stock,
+                has_shortage, shortage_qty
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, nodes)
 
 
 def _seed_supply_nodes(conn, pump_id, valve_id, atl_id, lax_id, series_pump, series_valve):
