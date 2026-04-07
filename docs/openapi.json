@@ -637,8 +637,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import articles",
-        "description": "Upsert batch d'articles. Clé d'upsert : external_id.",
+        "summary": "Import items",
+        "description": "Upsert a batch of items. Upsert key: external_id.",
         "operationId": "ingest_items_v1_ingest_items_post",
         "requestBody": {
           "content": {
@@ -684,8 +684,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import sites",
-        "description": "Upsert batch de sites/DCs. Clé d'upsert : external_id.",
+        "summary": "Import locations",
+        "description": "Upsert a batch of sites/DCs. Upsert key: external_id.",
         "operationId": "ingest_locations_v1_ingest_locations_post",
         "requestBody": {
           "content": {
@@ -731,8 +731,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import fournisseurs",
-        "description": "Upsert batch de fournisseurs.",
+        "summary": "Import suppliers",
+        "description": "Upsert a batch of suppliers.",
         "operationId": "ingest_suppliers_v1_ingest_suppliers_post",
         "requestBody": {
           "content": {
@@ -778,8 +778,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import conditions fournisseurs",
-        "description": "Upsert des conditions d'approvisionnement par couple (fournisseur × article).",
+        "summary": "Import supplier items",
+        "description": "Upsert supply conditions per (supplier × item) pair.",
         "operationId": "ingest_supplier_items_v1_ingest_supplier_items_post",
         "requestBody": {
           "content": {
@@ -825,8 +825,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import stock physique",
-        "description": "Upsert du stock disponible (OnHandSupply) par (article × site).",
+        "summary": "Import on-hand stock",
+        "description": "Upsert available stock (OnHandSupply) per (item × location).",
         "operationId": "ingest_on_hand_v1_ingest_on_hand_post",
         "requestBody": {
           "content": {
@@ -872,8 +872,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import commandes d'achat",
-        "description": "Upsert de POs (PurchaseOrderSupply) avec tracking external_id ERP.",
+        "summary": "Import purchase orders",
+        "description": "Upsert purchase orders (PurchaseOrderSupply) with ERP external_id tracking.",
         "operationId": "ingest_purchase_orders_v1_ingest_purchase_orders_post",
         "requestBody": {
           "content": {
@@ -919,8 +919,8 @@
         "tags": [
           "ingest"
         ],
-        "summary": "Import prévisions de demande",
-        "description": "Upsert de prévisions (ForecastDemand) par (article × site × bucket × grain).",
+        "summary": "Import forecast demand",
+        "description": "Upsert forecasts (ForecastDemand) per (item × location × bucket × grain).",
         "operationId": "ingest_forecast_demand_v1_ingest_forecast_demand_post",
         "requestBody": {
           "content": {
@@ -966,8 +966,8 @@
         "tags": [
           "bom"
         ],
-        "summary": "Import nomenclature",
-        "description": "Importe une nomenclature complète (BOM) pour un article. Calcule les Low-Level Codes (LLC) automatiquement.",
+        "summary": "Import BOM",
+        "description": "Import a complete Bill of Materials for an item. Automatically computes Low-Level Codes (LLC).",
         "operationId": "ingest_bom_v1_ingest_bom_post",
         "requestBody": {
           "content": {
@@ -1013,8 +1013,8 @@
         "tags": [
           "bom"
         ],
-        "summary": "Lire nomenclature",
-        "description": "Retourne la nomenclature active d'un article avec ses composants et LLC.",
+        "summary": "Get BOM",
+        "description": "Return the active BOM for an item with its components and LLC.",
         "operationId": "get_bom_v1_bom__parent_external_id__get",
         "security": [
           {
@@ -1061,8 +1061,8 @@
         "tags": [
           "bom"
         ],
-        "summary": "Explosion MRP",
-        "description": "Calcule les besoins bruts et nets en composants pour une quantité donnée (explosion multi-niveau, netting sur stock disponible).",
+        "summary": "MRP explosion",
+        "description": "Compute gross and net component requirements for a given quantity (multi-level explosion, netting against available stock).",
         "operationId": "explode_bom_v1_bom_explode_post",
         "requestBody": {
           "content": {
@@ -1108,8 +1108,8 @@
         "tags": [
           "calendars"
         ],
-        "summary": "Import calendrier",
-        "description": "Importe des jours non ouvrés pour un site. Upsert par (location × date). Absence d'entrée = jour ouvré par défaut.",
+        "summary": "Import calendar",
+        "description": "Import non-working days for a location. Upsert per (location × date). Missing entry = working day by default.",
         "operationId": "ingest_calendars_v1_ingest_calendars_post",
         "requestBody": {
           "content": {
@@ -1155,8 +1155,8 @@
         "tags": [
           "calendars"
         ],
-        "summary": "Lire calendrier",
-        "description": "Liste les entrées calendaires d'un site (optionnel: filtrage par plage de dates).",
+        "summary": "Get calendar",
+        "description": "List calendar entries for a location (optional: filter by date range).",
         "operationId": "get_calendars_v1_calendars__location_external_id__get",
         "security": [
           {
@@ -1247,8 +1247,8 @@
         "tags": [
           "calendars"
         ],
-        "summary": "Calcul jours ouvrés",
-        "description": "Retourne la date résultant de l'ajout de N jours ouvrés à une date de départ, en respectant le calendrier du site.",
+        "summary": "Compute working days",
+        "description": "Return the date resulting from adding N working days to a start date, respecting the location calendar.",
         "operationId": "compute_working_days_v1_calendars_working_days_post",
         "requestBody": {
           "content": {
@@ -1297,18 +1297,18 @@
           "component_external_id": {
             "type": "string",
             "title": "Component External Id",
-            "description": "External_id du composant."
+            "description": "Component external_id."
           },
           "quantity_per": {
             "type": "number",
             "exclusiveMinimum": 0.0,
             "title": "Quantity Per",
-            "description": "Quantité de composant pour 1 unité du parent (> 0)."
+            "description": "Component quantity per 1 unit of parent (> 0)."
           },
           "uom": {
             "type": "string",
             "title": "Uom",
-            "description": "Unité de mesure du composant.",
+            "description": "Component unit of measure.",
             "default": "EA"
           },
           "scrap_factor": {
@@ -1316,7 +1316,7 @@
             "exclusiveMaximum": 1.0,
             "minimum": 0.0,
             "title": "Scrap Factor",
-            "description": "Taux de rebut [0.0–1.0). Ex: 0.05 = 5% de perte.",
+            "description": "Scrap rate [0.0–1.0). E.g. 0.05 = 5% waste.",
             "default": 0.0
           }
         },
@@ -1408,12 +1408,12 @@
             "type": "string",
             "format": "date",
             "title": "Calendar Date",
-            "description": "Date concernée (YYYY-MM-DD)."
+            "description": "Calendar date (YYYY-MM-DD)."
           },
           "is_working_day": {
             "type": "boolean",
             "title": "Is Working Day",
-            "description": "False = jour non ouvré (férié, fermeture). Défaut = False.",
+            "description": "False = non-working day (holiday, closure). Default = False.",
             "default": false
           },
           "shift_count": {
@@ -1428,7 +1428,7 @@
               }
             ],
             "title": "Shift Count",
-            "description": "Nombre de shifts ce jour [0–3]. Optionnel."
+            "description": "Number of shifts on this day [0–3]. Optional."
           },
           "capacity_factor": {
             "anyOf": [
@@ -1442,7 +1442,7 @@
               }
             ],
             "title": "Capacity Factor",
-            "description": "Facteur de capacité [0.0–2.0]. 1.0 = capacité normale. Optionnel."
+            "description": "Capacity factor [0.0–2.0]. 1.0 = normal capacity. Optional."
           },
           "notes": {
             "anyOf": [
@@ -1454,7 +1454,7 @@
               }
             ],
             "title": "Notes",
-            "description": "Commentaire (ex: 'Noël', 'Maintenance planifiée'). Optionnel."
+            "description": "Notes (e.g. 'Christmas', 'Planned maintenance'). Optional."
           }
         },
         "type": "object",
@@ -1878,13 +1878,13 @@
           "item_external_id": {
             "type": "string",
             "title": "Item External Id",
-            "description": "Article à exploser."
+            "description": "Item to explode."
           },
           "quantity": {
             "type": "number",
             "exclusiveMinimum": 0.0,
             "title": "Quantity",
-            "description": "Quantité à produire (> 0)."
+            "description": "Quantity to produce (> 0)."
           },
           "location_external_id": {
             "anyOf": [
@@ -1896,7 +1896,7 @@
               }
             ],
             "title": "Location External Id",
-            "description": "Site de production. Optionnel."
+            "description": "Production site. Optional."
           },
           "explosion_date": {
             "anyOf": [
@@ -1909,14 +1909,14 @@
               }
             ],
             "title": "Explosion Date",
-            "description": "Date de référence pour l'explosion. Défaut = aujourd'hui."
+            "description": "Reference date for explosion. Defaults to today."
           },
           "levels": {
             "type": "integer",
             "maximum": 20.0,
             "minimum": 1.0,
             "title": "Levels",
-            "description": "Profondeur max d'explosion [1–20]. Défaut = 10.",
+            "description": "Maximum explosion depth [1–20]. Default = 10.",
             "default": 10
           }
         },
@@ -1968,28 +1968,28 @@
           "item_external_id": {
             "type": "string",
             "title": "Item External Id",
-            "description": "Article prévu."
+            "description": "Forecasted item."
           },
           "location_external_id": {
             "type": "string",
             "title": "Location External Id",
-            "description": "Site de consommation."
+            "description": "Consumption site."
           },
           "quantity": {
             "type": "number",
             "title": "Quantity",
-            "description": "Quantité prévisionnelle (>= 0)."
+            "description": "Forecasted quantity (>= 0)."
           },
           "bucket_date": {
             "type": "string",
             "format": "date",
             "title": "Bucket Date",
-            "description": "Date de début du bucket (YYYY-MM-DD)."
+            "description": "Bucket start date (YYYY-MM-DD)."
           },
           "time_grain": {
             "type": "string",
             "title": "Time Grain",
-            "description": "Maille temporelle. Valeurs: day | week | month.",
+            "description": "Time grain. Values: day | week | month.",
             "default": "week"
           },
           "source": {
@@ -2101,19 +2101,19 @@
           "parent_external_id": {
             "type": "string",
             "title": "Parent External Id",
-            "description": "External_id de l'article parent (article fabriqué)."
+            "description": "Parent item external_id (manufactured item)."
           },
           "bom_version": {
             "type": "string",
             "title": "Bom Version",
-            "description": "Version de la nomenclature (ex: '1.0', '2.1').",
+            "description": "BOM version (e.g. '1.0', '2.1').",
             "default": "1.0"
           },
           "effective_from": {
             "type": "string",
             "format": "date",
             "title": "Effective From",
-            "description": "Date d'entrée en vigueur de la nomenclature."
+            "description": "BOM effective date."
           },
           "components": {
             "items": {
@@ -2121,12 +2121,12 @@
             },
             "type": "array",
             "title": "Components",
-            "description": "Liste des composants de la nomenclature."
+            "description": "BOM component list."
           },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
-            "description": "Si true, validation uniquement — aucune écriture en base.",
+            "description": "If true, validation only — no DB writes.",
             "default": false
           }
         },
@@ -2187,7 +2187,7 @@
           "location_external_id": {
             "type": "string",
             "title": "Location External Id",
-            "description": "External_id du site concerné."
+            "description": "External_id of the target location."
           },
           "entries": {
             "items": {
@@ -2195,12 +2195,12 @@
             },
             "type": "array",
             "title": "Entries",
-            "description": "Entrées calendaires à importer (upsert par location × date)."
+            "description": "Calendar entries to import (upsert per location × date)."
           },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
-            "description": "Si true, validation uniquement — aucune écriture en base.",
+            "description": "If true, validation only — no DB writes.",
             "default": false
           }
         },
@@ -2592,29 +2592,29 @@
           "external_id": {
             "type": "string",
             "title": "External Id",
-            "description": "Identifiant métier unique (ex: SKU ERP). Clé d'upsert."
+            "description": "Unique business identifier (e.g. ERP SKU). Upsert key."
           },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Libellé de l'article."
+            "description": "Item label / description."
           },
           "item_type": {
             "type": "string",
             "title": "Item Type",
-            "description": "Type d'article. Valeurs: finished_good | component | raw_material | semi_finished.",
+            "description": "Item type. Values: finished_good | component | raw_material | semi_finished.",
             "default": "finished_good"
           },
           "uom": {
             "type": "string",
             "title": "Uom",
-            "description": "Unité de mesure de base (ex: EA, KG, BOX).",
+            "description": "Base unit of measure (e.g. EA, KG, BOX).",
             "default": "EA"
           },
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "Statut. Valeurs: active | obsolete | phase_out.",
+            "description": "Item status. Values: active | obsolete | phase_out.",
             "default": "active"
           }
         },
@@ -2630,17 +2630,17 @@
           "external_id": {
             "type": "string",
             "title": "External Id",
-            "description": "Identifiant site/DC (ex: DC-ATL). Clé d'upsert."
+            "description": "Site/DC identifier (e.g. DC-ATL). Upsert key."
           },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Libellé du site."
+            "description": "Site label / description."
           },
           "location_type": {
             "type": "string",
             "title": "Location Type",
-            "description": "Type. Valeurs: warehouse | factory | supplier | customer.",
+            "description": "Location type. Values: warehouse | factory | supplier | customer.",
             "default": "dc"
           },
           "country": {
@@ -2675,7 +2675,7 @@
               }
             ],
             "title": "Parent External Id",
-            "description": "External_id du site parent (optionnel, pour hiérarchies)."
+            "description": "External_id of the parent site (optional, for hierarchies)."
           }
         },
         "type": "object",
@@ -3033,27 +3033,27 @@
           "external_id": {
             "type": "string",
             "title": "External Id",
-            "description": "Numéro de PO ERP. Clé d'upsert."
+            "description": "ERP PO number. Upsert key."
           },
           "item_external_id": {
             "type": "string",
             "title": "Item External Id",
-            "description": "Article commandé."
+            "description": "Ordered item."
           },
           "location_external_id": {
             "type": "string",
             "title": "Location External Id",
-            "description": "Site de réception."
+            "description": "Receiving site."
           },
           "supplier_external_id": {
             "type": "string",
             "title": "Supplier External Id",
-            "description": "Fournisseur. Optionnel."
+            "description": "Supplier. Optional."
           },
           "quantity": {
             "type": "number",
             "title": "Quantity",
-            "description": "Quantité commandée (> 0)."
+            "description": "Ordered quantity (> 0)."
           },
           "uom": {
             "type": "string",
@@ -3064,7 +3064,7 @@
             "type": "string",
             "format": "date",
             "title": "Expected Delivery Date",
-            "description": "Date de réception prévue (YYYY-MM-DD)."
+            "description": "Expected receipt date (YYYY-MM-DD)."
           },
           "status": {
             "type": "string",
@@ -3211,12 +3211,12 @@
           "external_id": {
             "type": "string",
             "title": "External Id",
-            "description": "Code fournisseur ERP. Clé d'upsert."
+            "description": "ERP supplier code. Upsert key."
           },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Raison sociale."
+            "description": "Legal name."
           },
           "lead_time_days": {
             "anyOf": [
@@ -3229,7 +3229,7 @@
               }
             ],
             "title": "Lead Time Days",
-            "description": "Délai d'approvisionnement standard en jours calendaires."
+            "description": "Standard lead time in calendar days."
           },
           "reliability_score": {
             "anyOf": [
@@ -3241,7 +3241,7 @@
               }
             ],
             "title": "Reliability Score",
-            "description": "Score de fiabilité [0.0–1.0]. 1.0 = parfait."
+            "description": "Reliability score [0.0–1.0]. 1.0 = perfect."
           },
           "moq": {
             "anyOf": [
@@ -3334,20 +3334,20 @@
           "location_external_id": {
             "type": "string",
             "title": "Location External Id",
-            "description": "External_id du site."
+            "description": "Location external_id."
           },
           "start_date": {
             "type": "string",
             "format": "date",
             "title": "Start Date",
-            "description": "Date de départ (YYYY-MM-DD)."
+            "description": "Start date (YYYY-MM-DD)."
           },
           "add_working_days": {
             "type": "integer",
             "maximum": 1000.0,
             "minimum": 0.0,
             "title": "Add Working Days",
-            "description": "Nombre de jours ouvrés à ajouter (>= 0)."
+            "description": "Number of working days to add (>= 0)."
           }
         },
         "type": "object",

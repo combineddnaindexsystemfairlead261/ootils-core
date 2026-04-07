@@ -33,18 +33,18 @@ BASELINE_SCENARIO_ID = UUID("00000000-0000-0000-0000-000000000001")
 # ─────────────────────────────────────────────────────────────
 
 class BOMComponentInput(BaseModel):
-    component_external_id: str = Field(..., description="External_id du composant.")
-    quantity_per: float = Field(..., gt=0, description="Quantité de composant pour 1 unité du parent (> 0).")
-    uom: str = Field("EA", description="Unité de mesure du composant.")
-    scrap_factor: float = Field(default=0.0, ge=0.0, lt=1.0, description="Taux de rebut [0.0–1.0). Ex: 0.05 = 5% de perte.")
+    component_external_id: str = Field(..., description="Component external_id.")
+    quantity_per: float = Field(..., gt=0, description="Component quantity per 1 unit of parent (> 0).")
+    uom: str = Field("EA", description="Component unit of measure.")
+    scrap_factor: float = Field(default=0.0, ge=0.0, lt=1.0, description="Scrap rate [0.0–1.0). E.g. 0.05 = 5% waste.")
 
 
 class IngestBOMRequest(BaseModel):
-    parent_external_id: str = Field(..., description="External_id de l'article parent (article fabriqué).")
-    bom_version: str = Field("1.0", description="Version de la nomenclature (ex: '1.0', '2.1').")
-    effective_from: date = Field(default_factory=date.today, description="Date d'entrée en vigueur de la nomenclature.")
-    components: list[BOMComponentInput] = Field(..., description="Liste des composants de la nomenclature.")
-    dry_run: bool = Field(False, description="Si true, validation uniquement — aucune écriture en base.")
+    parent_external_id: str = Field(..., description="Parent item external_id (manufactured item).")
+    bom_version: str = Field("1.0", description="BOM version (e.g. '1.0', '2.1').")
+    effective_from: date = Field(default_factory=date.today, description="BOM effective date.")
+    components: list[BOMComponentInput] = Field(..., description="BOM component list.")
+    dry_run: bool = Field(False, description="If true, validation only — no DB writes.")
 
 
 class IngestBOMResponse(BaseModel):
@@ -73,11 +73,11 @@ class BOMResponse(BaseModel):
 
 
 class ExplodeRequest(BaseModel):
-    item_external_id: str = Field(..., description="Article à exploser.")
-    quantity: float = Field(..., gt=0, description="Quantité à produire (> 0).")
-    location_external_id: Optional[str] = Field(None, description="Site de production. Optionnel.")
-    explosion_date: Optional[date] = Field(None, description="Date de référence pour l'explosion. Défaut = aujourd'hui.")
-    levels: int = Field(default=10, ge=1, le=20, description="Profondeur max d'explosion [1–20]. Défaut = 10.")
+    item_external_id: str = Field(..., description="Item to explode.")
+    quantity: float = Field(..., gt=0, description="Quantity to produce (> 0).")
+    location_external_id: Optional[str] = Field(None, description="Production site. Optional.")
+    explosion_date: Optional[date] = Field(None, description="Reference date for explosion. Defaults to today.")
+    levels: int = Field(default=10, ge=1, le=20, description="Maximum explosion depth [1–20]. Default = 10.")
 
 
 class ExplodeLineOutput(BaseModel):
@@ -315,7 +315,7 @@ def _recalculate_llc(db: psycopg.Connection, affected_item_ids: list[UUID]) -> i
 # POST /v1/ingest/bom
 # ─────────────────────────────────────────────────────────────
 
-@router.post("/ingest/bom", response_model=IngestBOMResponse, summary="Import nomenclature", description="Importe une nomenclature complète (BOM) pour un article. Calcule les Low-Level Codes (LLC) automatiquement.")
+@router.post("/ingest/bom", response_model=IngestBOMResponse, summary="Import BOM", description="Import a complete Bill of Materials for an item. Automatically computes Low-Level Codes (LLC).")
 async def ingest_bom(
     body: IngestBOMRequest,
     db: psycopg.Connection = Depends(get_db),
@@ -427,7 +427,7 @@ async def ingest_bom(
 # GET /v1/bom/{parent_external_id}
 # ─────────────────────────────────────────────────────────────
 
-@router.get("/bom/{parent_external_id}", response_model=BOMResponse, summary="Lire nomenclature", description="Retourne la nomenclature active d'un article avec ses composants et LLC.")
+@router.get("/bom/{parent_external_id}", response_model=BOMResponse, summary="Get BOM", description="Return the active BOM for an item with its components and LLC.")
 async def get_bom(
     parent_external_id: str,
     db: psycopg.Connection = Depends(get_db),
@@ -473,7 +473,7 @@ async def get_bom(
 # POST /v1/bom/explode
 # ─────────────────────────────────────────────────────────────
 
-@router.post("/bom/explode", response_model=ExplodeResponse, summary="Explosion MRP", description="Calcule les besoins bruts et nets en composants pour une quantité donnée (explosion multi-niveau, netting sur stock disponible).")
+@router.post("/bom/explode", response_model=ExplodeResponse, summary="MRP explosion", description="Compute gross and net component requirements for a given quantity (multi-level explosion, netting against available stock).")
 async def explode_bom(
     body: ExplodeRequest,
     db: psycopg.Connection = Depends(get_db),
