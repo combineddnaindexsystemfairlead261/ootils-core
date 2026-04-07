@@ -43,11 +43,11 @@ def _resolve_location(db: psycopg.Connection, external_id: str) -> Optional[UUID
 # ─────────────────────────────────────────────────────────────
 
 class CalendarEntryInput(BaseModel):
-    calendar_date: date = Field(..., description="Date concernée (YYYY-MM-DD).")
-    is_working_day: bool = Field(False, description="False = jour non ouvré (férié, fermeture). Défaut = False.")
-    shift_count: Optional[int] = Field(default=None, ge=0, le=3, description="Nombre de shifts ce jour [0–3]. Optionnel.")
-    capacity_factor: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Facteur de capacité [0.0–2.0]. 1.0 = capacité normale. Optionnel.")
-    notes: Optional[str] = Field(None, description="Commentaire (ex: 'Noël', 'Maintenance planifiée'). Optionnel.")
+    calendar_date: date = Field(..., description="Calendar date (YYYY-MM-DD).")
+    is_working_day: bool = Field(False, description="False = non-working day (holiday, closure). Default = False.")
+    shift_count: Optional[int] = Field(default=None, ge=0, le=3, description="Number of shifts on this day [0–3]. Optional.")
+    capacity_factor: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Capacity factor [0.0–2.0]. 1.0 = normal capacity. Optional.")
+    notes: Optional[str] = Field(None, description="Notes (e.g. 'Christmas', 'Planned maintenance'). Optional.")
 
     @field_validator("capacity_factor")
     @classmethod
@@ -58,9 +58,9 @@ class CalendarEntryInput(BaseModel):
 
 
 class IngestCalendarsRequest(BaseModel):
-    location_external_id: str = Field(..., description="External_id du site concerné.")
-    entries: list[CalendarEntryInput] = Field(..., description="Entrées calendaires à importer (upsert par location × date).")
-    dry_run: bool = Field(False, description="Si true, validation uniquement — aucune écriture en base.")
+    location_external_id: str = Field(..., description="External_id of the target location.")
+    entries: list[CalendarEntryInput] = Field(..., description="Calendar entries to import (upsert per location × date).")
+    dry_run: bool = Field(False, description="If true, validation only — no DB writes.")
 
     @field_validator("location_external_id")
     @classmethod
@@ -100,9 +100,9 @@ class GetCalendarsResponse(BaseModel):
 
 
 class WorkingDaysRequest(BaseModel):
-    location_external_id: str = Field(..., description="External_id du site.")
-    start_date: date = Field(..., description="Date de départ (YYYY-MM-DD).")
-    add_working_days: int = Field(..., ge=0, le=1000, description="Nombre de jours ouvrés à ajouter (>= 0).")
+    location_external_id: str = Field(..., description="Location external_id.")
+    start_date: date = Field(..., description="Start date (YYYY-MM-DD).")
+    add_working_days: int = Field(..., ge=0, le=1000, description="Number of working days to add (>= 0).")
 
 
 class WorkingDaysResponse(BaseModel):
@@ -118,7 +118,7 @@ class WorkingDaysResponse(BaseModel):
 # POST /v1/ingest/calendars
 # ─────────────────────────────────────────────────────────────
 
-@router.post("/v1/ingest/calendars", response_model=IngestCalendarsResponse, summary="Import calendrier", description="Importe des jours non ouvrés pour un site. Upsert par (location × date). Absence d'entrée = jour ouvré par défaut.")
+@router.post("/v1/ingest/calendars", response_model=IngestCalendarsResponse, summary="Import calendar", description="Import non-working days for a location. Upsert per (location × date). Missing entry = working day by default.")
 async def ingest_calendars(
     body: IngestCalendarsRequest,
     db: psycopg.Connection = Depends(get_db),
@@ -218,7 +218,7 @@ async def ingest_calendars(
 # GET /v1/calendars/{location_external_id}
 # ─────────────────────────────────────────────────────────────
 
-@router.get("/v1/calendars/{location_external_id}", response_model=GetCalendarsResponse, summary="Lire calendrier", description="Liste les entrées calendaires d'un site (optionnel: filtrage par plage de dates).")
+@router.get("/v1/calendars/{location_external_id}", response_model=GetCalendarsResponse, summary="Get calendar", description="List calendar entries for a location (optional: filter by date range).")
 async def get_calendars(
     location_external_id: str,
     from_date: Optional[date] = Query(default=None),
@@ -289,7 +289,7 @@ async def get_calendars(
 # POST /v1/calendars/working-days
 # ─────────────────────────────────────────────────────────────
 
-@router.post("/v1/calendars/working-days", response_model=WorkingDaysResponse, summary="Calcul jours ouvrés", description="Retourne la date résultant de l'ajout de N jours ouvrés à une date de départ, en respectant le calendrier du site.")
+@router.post("/v1/calendars/working-days", response_model=WorkingDaysResponse, summary="Compute working days", description="Return the date resulting from adding N working days to a start date, respecting the location calendar.")
 async def compute_working_days(
     body: WorkingDaysRequest,
     db: psycopg.Connection = Depends(get_db),
