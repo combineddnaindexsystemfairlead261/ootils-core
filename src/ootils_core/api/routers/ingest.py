@@ -12,6 +12,10 @@ Endpoints:
 
 All endpoints accept JSON only (no TSV/CSV upload — MVP scope).
 All DB operations use psycopg3 sync connections (same as other routers).
+
+Behaviour contract (all 7 endpoints):
+  - Validate ALL rows first (structural + FK). If ANY error → HTTP 422, nothing persisted.
+  - dry_run: validation runs (including FK), but no DB writes; returns 200 with status="dry_run".
 """
 from __future__ import annotations
 
@@ -21,8 +25,8 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field, field_validator
 
 from ootils_core.api.auth import require_auth
 from ootils_core.api.dependencies import get_db
@@ -69,12 +73,9 @@ def _dry_run_response(items: list[Any], label: str = "external_id") -> IngestRes
     )
 
 
-def _error_response(total: int, errors: list[dict]) -> IngestResponse:
-    return IngestResponse(
-        status="error" if not any(e.get("action") not in (None, "error") for e in errors) else "partial",
-        summary=IngestSummary(total=total, inserted=0, updated=0, errors=len(errors)),
-        results=errors,
-    )
+def _raise_422(errors: list[dict]) -> None:
+    """Raise HTTP 422 with structured error list. Nothing is persisted."""
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=errors)
 
 
 def _batch_existing(
@@ -129,9 +130,8 @@ async def ingest_items(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert items by external_id."""
+    """Upsert items by external_id. All-or-nothing: any validation error → HTTP 422."""
     errors: list[dict] = []
-    valid_items: list[ItemRow] = []
 
     for i, item in enumerate(body.items):
         row_errs = []
@@ -140,26 +140,24 @@ async def ingest_items(
         if item.status not in VALID_ITEM_STATUSES:
             row_errs.append(f"status '{item.status}' invalid; valid: {sorted(VALID_ITEM_STATUSES)}")
         if row_errs:
-            errors.append({"external_id": item.external_id, "row": i, "errors": row_errs, "action": "error"})
-        else:
-            valid_items.append(item)
+            errors.append({"external_id": item.external_id, "row": i, "errors": row_errs})
 
     if errors:
-        return _error_response(len(body.items), errors)
+        _raise_422(errors)
 
     if body.dry_run:
-        return _dry_run_response(valid_items)
+        return _dry_run_response(body.items)
 
     # Batch-fetch existing items
     existing = _batch_existing(
         db, "items", "external_id", "item_id",
-        [it.external_id for it in valid_items],
+        [it.external_id for it in body.items],
     )
 
     results: list[dict] = []
     inserted = updated = 0
 
-    for item in valid_items:
+    for item in body.items:
         if item.external_id in existing:
             db.execute(
                 """
@@ -183,7 +181,7 @@ async def ingest_items(
             results.append({"external_id": item.external_id, "item_id": str(item_id), "action": "inserted"})
             inserted += 1
 
-    logger.info("ingest.items total=%d inserted=%d updated=%d", len(valid_items), inserted, updated)
+    logger.info("ingest.items total=%d inserted=%d updated=%d", len(body.items), inserted, updated)
     return _ok(inserted, updated, len(body.items), results)
 
 
@@ -222,9 +220,8 @@ async def ingest_locations(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert locations by external_id."""
+    """Upsert locations by external_id. All-or-nothing: any validation error → HTTP 422."""
     errors: list[dict] = []
-    valid_locs: list[LocationRow] = []
 
     # Build set of external_ids in the payload (for parent validation)
     payload_ext_ids = {loc.external_id for loc in body.locations}
@@ -246,30 +243,28 @@ async def ingest_locations(
                     f"parent_external_id '{loc.parent_external_id}' not found in payload or DB"
                 )
         if row_errs:
-            errors.append({"external_id": loc.external_id, "row": i, "errors": row_errs, "action": "error"})
-        else:
-            valid_locs.append(loc)
+            errors.append({"external_id": loc.external_id, "row": i, "errors": row_errs})
 
     if errors:
-        return _error_response(len(body.locations), errors)
+        _raise_422(errors)
 
     if body.dry_run:
-        return _dry_run_response(valid_locs)
+        return _dry_run_response(body.locations)
 
     existing = _batch_existing(
         db, "locations", "external_id", "location_id",
-        [loc.external_id for loc in valid_locs],
+        [loc.external_id for loc in body.locations],
     )
 
     results: list[dict] = []
     inserted = updated = 0
 
-    for loc in valid_locs:
+    for loc in body.locations:
         if loc.external_id in existing:
             db.execute(
                 """
                 UPDATE locations
-                SET name = %s, location_type = %s, country = %s, timezone = %s
+                SET name = %s, location_type = %s, country = %s, timezone = %s, updated_at = now()
                 WHERE external_id = %s
                 """,
                 (loc.name, loc.location_type, loc.country, loc.timezone, loc.external_id),
@@ -288,7 +283,7 @@ async def ingest_locations(
             results.append({"external_id": loc.external_id, "location_id": str(location_id), "action": "inserted"})
             inserted += 1
 
-    logger.info("ingest.locations total=%d inserted=%d updated=%d", len(valid_locs), inserted, updated)
+    logger.info("ingest.locations total=%d inserted=%d updated=%d", len(body.locations), inserted, updated)
     return _ok(inserted, updated, len(body.locations), results)
 
 
@@ -302,7 +297,8 @@ VALID_SUPPLIER_STATUSES = {"active", "inactive", "blocked"}
 class SupplierRow(BaseModel):
     external_id: str
     name: str
-    lead_time_days: Optional[int] = None
+    # W-06: lead_time_days must be > 0 when provided
+    lead_time_days: Optional[int] = Field(None, gt=0)
     reliability_score: Optional[float] = None
     moq: Optional[float] = None          # not a suppliers column, accepted but not persisted
     currency: Optional[str] = None       # not a suppliers column, accepted but not persisted
@@ -329,9 +325,8 @@ async def ingest_suppliers(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert suppliers by external_id."""
+    """Upsert suppliers by external_id. All-or-nothing: any validation error → HTTP 422."""
     errors: list[dict] = []
-    valid_suppliers: list[SupplierRow] = []
 
     for i, sup in enumerate(body.suppliers):
         row_errs = []
@@ -340,25 +335,23 @@ async def ingest_suppliers(
         if sup.reliability_score is not None and not (0.0 <= sup.reliability_score <= 1.0):
             row_errs.append(f"reliability_score {sup.reliability_score} must be in [0, 1]")
         if row_errs:
-            errors.append({"external_id": sup.external_id, "row": i, "errors": row_errs, "action": "error"})
-        else:
-            valid_suppliers.append(sup)
+            errors.append({"external_id": sup.external_id, "row": i, "errors": row_errs})
 
     if errors:
-        return _error_response(len(body.suppliers), errors)
+        _raise_422(errors)
 
     if body.dry_run:
-        return _dry_run_response(valid_suppliers)
+        return _dry_run_response(body.suppliers)
 
     existing = _batch_existing(
         db, "suppliers", "external_id", "supplier_id",
-        [s.external_id for s in valid_suppliers],
+        [s.external_id for s in body.suppliers],
     )
 
     results: list[dict] = []
     inserted = updated = 0
 
-    for sup in valid_suppliers:
+    for sup in body.suppliers:
         if sup.external_id in existing:
             db.execute(
                 """
@@ -383,7 +376,7 @@ async def ingest_suppliers(
             results.append({"external_id": sup.external_id, "supplier_id": str(supplier_id), "action": "inserted"})
             inserted += 1
 
-    logger.info("ingest.suppliers total=%d inserted=%d updated=%d", len(valid_suppliers), inserted, updated)
+    logger.info("ingest.suppliers total=%d inserted=%d updated=%d", len(body.suppliers), inserted, updated)
     return _ok(inserted, updated, len(body.suppliers), results)
 
 
@@ -394,7 +387,8 @@ async def ingest_suppliers(
 class SupplierItemRow(BaseModel):
     supplier_external_id: str
     item_external_id: str
-    lead_time_days: int
+    # W-06: lead_time_days must be > 0
+    lead_time_days: int = Field(..., gt=0)
     moq: Optional[float] = None
     unit_cost: Optional[float] = None
     is_preferred: bool = False
@@ -413,49 +407,52 @@ async def ingest_supplier_items(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert supplier_items by (supplier_id, item_id)."""
-    if body.dry_run:
-        results = []
-        for si in body.supplier_items:
-            results.append({
-                "supplier_external_id": si.supplier_external_id,
-                "item_external_id": si.item_external_id,
-                "action": "dry_run",
-            })
-        return IngestResponse(
-            status="dry_run",
-            summary=IngestSummary(total=len(body.supplier_items), inserted=0, updated=0, errors=0),
-            results=results,
-        )
-
-    # Resolve all supplier_external_ids in one query
+    """Upsert supplier_items by (supplier_id, item_id). All-or-nothing: any error → HTTP 422."""
+    # W-01: resolve FKs first, collect ALL errors before any write
     sup_ext_ids = list({si.supplier_external_id for si in body.supplier_items})
     item_ext_ids = list({si.item_external_id for si in body.supplier_items})
 
     supplier_map = _batch_existing(db, "suppliers", "external_id", "supplier_id", sup_ext_ids)
     item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
 
-    results: list[dict] = []
-    inserted = updated = errors_count = 0
-
+    errors: list[dict] = []
     for i, si in enumerate(body.supplier_items):
         row_errs = []
         if si.supplier_external_id not in supplier_map:
             row_errs.append(f"supplier_external_id '{si.supplier_external_id}' not found in DB")
         if si.item_external_id not in item_map:
             row_errs.append(f"item_external_id '{si.item_external_id}' not found in DB")
-
         if row_errs:
-            results.append({
+            errors.append({
                 "supplier_external_id": si.supplier_external_id,
                 "item_external_id": si.item_external_id,
                 "row": i,
                 "errors": row_errs,
-                "action": "error",
             })
-            errors_count += 1
-            continue
 
+    # W-01+W-02: if any error → 422, nothing persisted
+    if errors:
+        _raise_422(errors)
+
+    if body.dry_run:
+        results = [
+            {
+                "supplier_external_id": si.supplier_external_id,
+                "item_external_id": si.item_external_id,
+                "action": "dry_run",
+            }
+            for si in body.supplier_items
+        ]
+        return IngestResponse(
+            status="dry_run",
+            summary=IngestSummary(total=len(body.supplier_items), inserted=0, updated=0, errors=0),
+            results=results,
+        )
+
+    results: list[dict] = []
+    inserted = updated = 0
+
+    for si in body.supplier_items:
         supplier_id = supplier_map[si.supplier_external_id]
         item_id = item_map[si.item_external_id]
 
@@ -470,7 +467,7 @@ async def ingest_supplier_items(
                 """
                 UPDATE supplier_items
                 SET lead_time_days = %s, moq = %s, unit_cost = %s,
-                    is_preferred = %s, currency = %s
+                    is_preferred = %s, currency = %s, updated_at = now()
                 WHERE supplier_id = %s AND item_id = %s
                 """,
                 (si.lead_time_days, si.moq, si.unit_cost, si.is_preferred, si.currency, supplier_id, item_id),
@@ -501,20 +498,10 @@ async def ingest_supplier_items(
             inserted += 1
 
     logger.info(
-        "ingest.supplier_items total=%d inserted=%d updated=%d errors=%d",
-        len(body.supplier_items), inserted, updated, errors_count,
+        "ingest.supplier_items total=%d inserted=%d updated=%d",
+        len(body.supplier_items), inserted, updated,
     )
-    total_status = "ok" if errors_count == 0 else ("partial" if (inserted + updated) > 0 else "error")
-    return IngestResponse(
-        status=total_status,
-        summary=IngestSummary(
-            total=len(body.supplier_items),
-            inserted=inserted,
-            updated=updated,
-            errors=errors_count,
-        ),
-        results=results,
-    )
+    return _ok(inserted, updated, len(body.supplier_items), results)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -540,7 +527,33 @@ async def ingest_on_hand(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert OnHandSupply nodes in the baseline scenario."""
+    """Upsert OnHandSupply nodes in the baseline scenario. All-or-nothing: any error → HTTP 422."""
+    # W-01: resolve FKs first, collect ALL errors before any write
+    item_ext_ids = list({r.item_external_id for r in body.on_hand})
+    loc_ext_ids = list({r.location_external_id for r in body.on_hand})
+
+    item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
+    loc_map = _batch_existing(db, "locations", "external_id", "location_id", loc_ext_ids)
+
+    errors: list[dict] = []
+    for i, row in enumerate(body.on_hand):
+        row_errs = []
+        if row.item_external_id not in item_map:
+            row_errs.append(f"item_external_id '{row.item_external_id}' not found in DB")
+        if row.location_external_id not in loc_map:
+            row_errs.append(f"location_external_id '{row.location_external_id}' not found in DB")
+        if row_errs:
+            errors.append({
+                "item_external_id": row.item_external_id,
+                "location_external_id": row.location_external_id,
+                "row": i,
+                "errors": row_errs,
+            })
+
+    # W-01+W-02: if any FK error → 422, nothing persisted
+    if errors:
+        _raise_422(errors)
+
     if body.dry_run:
         results = [
             {"item_external_id": r.item_external_id, "location_external_id": r.location_external_id, "action": "dry_run"}
@@ -552,33 +565,10 @@ async def ingest_on_hand(
             results=results,
         )
 
-    item_ext_ids = list({r.item_external_id for r in body.on_hand})
-    loc_ext_ids = list({r.location_external_id for r in body.on_hand})
-
-    item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
-    loc_map = _batch_existing(db, "locations", "external_id", "location_id", loc_ext_ids)
-
     results: list[dict] = []
-    inserted = updated = errors_count = 0
+    inserted = updated = 0
 
-    for i, row in enumerate(body.on_hand):
-        row_errs = []
-        if row.item_external_id not in item_map:
-            row_errs.append(f"item_external_id '{row.item_external_id}' not found in DB")
-        if row.location_external_id not in loc_map:
-            row_errs.append(f"location_external_id '{row.location_external_id}' not found in DB")
-
-        if row_errs:
-            results.append({
-                "item_external_id": row.item_external_id,
-                "location_external_id": row.location_external_id,
-                "row": i,
-                "errors": row_errs,
-                "action": "error",
-            })
-            errors_count += 1
-            continue
-
+    for row in body.on_hand:
         item_id = item_map[row.item_external_id]
         location_id = loc_map[row.location_external_id]
 
@@ -632,20 +622,10 @@ async def ingest_on_hand(
             inserted += 1
 
     logger.info(
-        "ingest.on_hand total=%d inserted=%d updated=%d errors=%d",
-        len(body.on_hand), inserted, updated, errors_count,
+        "ingest.on_hand total=%d inserted=%d updated=%d",
+        len(body.on_hand), inserted, updated,
     )
-    total_status = "ok" if errors_count == 0 else ("partial" if (inserted + updated) > 0 else "error")
-    return IngestResponse(
-        status=total_status,
-        summary=IngestSummary(
-            total=len(body.on_hand),
-            inserted=inserted,
-            updated=updated,
-            errors=errors_count,
-        ),
-        results=results,
-    )
+    return _ok(inserted, updated, len(body.on_hand), results)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -684,14 +664,8 @@ async def ingest_purchase_orders(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert PurchaseOrderSupply nodes, tracked via external_references."""
-    if body.dry_run:
-        return IngestResponse(
-            status="dry_run",
-            summary=IngestSummary(total=len(body.purchase_orders), inserted=0, updated=0, errors=0),
-            results=[{"external_id": po.external_id, "action": "dry_run"} for po in body.purchase_orders],
-        )
-
+    """Upsert PurchaseOrderSupply nodes, tracked via external_references. All-or-nothing: any error → HTTP 422."""
+    # W-01: resolve FKs first, collect ALL errors before any write
     item_ext_ids = list({po.item_external_id for po in body.purchase_orders})
     loc_ext_ids = list({po.location_external_id for po in body.purchase_orders})
     sup_ext_ids = list({po.supplier_external_id for po in body.purchase_orders})
@@ -699,6 +673,29 @@ async def ingest_purchase_orders(
     item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
     loc_map = _batch_existing(db, "locations", "external_id", "location_id", loc_ext_ids)
     sup_map = _batch_existing(db, "suppliers", "external_id", "supplier_id", sup_ext_ids)
+
+    errors: list[dict] = []
+    for i, po in enumerate(body.purchase_orders):
+        row_errs = []
+        if po.item_external_id not in item_map:
+            row_errs.append(f"item_external_id '{po.item_external_id}' not found in DB")
+        if po.location_external_id not in loc_map:
+            row_errs.append(f"location_external_id '{po.location_external_id}' not found in DB")
+        if po.supplier_external_id not in sup_map:
+            row_errs.append(f"supplier_external_id '{po.supplier_external_id}' not found in DB")
+        if row_errs:
+            errors.append({"external_id": po.external_id, "row": i, "errors": row_errs})
+
+    # W-01+W-02: if any FK error → 422, nothing persisted
+    if errors:
+        _raise_422(errors)
+
+    if body.dry_run:
+        return IngestResponse(
+            status="dry_run",
+            summary=IngestSummary(total=len(body.purchase_orders), inserted=0, updated=0, errors=0),
+            results=[{"external_id": po.external_id, "action": "dry_run"} for po in body.purchase_orders],
+        )
 
     # Fetch existing PO node references
     po_ext_ids = [po.external_id for po in body.purchase_orders]
@@ -712,22 +709,9 @@ async def ingest_purchase_orders(
     existing_refs: dict[str, UUID] = {r["external_id"]: r["internal_id"] for r in existing_refs_rows}
 
     results: list[dict] = []
-    inserted = updated = errors_count = 0
+    inserted = updated = 0
 
-    for i, po in enumerate(body.purchase_orders):
-        row_errs = []
-        if po.item_external_id not in item_map:
-            row_errs.append(f"item_external_id '{po.item_external_id}' not found in DB")
-        if po.location_external_id not in loc_map:
-            row_errs.append(f"location_external_id '{po.location_external_id}' not found in DB")
-        if po.supplier_external_id not in sup_map:
-            row_errs.append(f"supplier_external_id '{po.supplier_external_id}' not found in DB")
-
-        if row_errs:
-            results.append({"external_id": po.external_id, "row": i, "errors": row_errs, "action": "error"})
-            errors_count += 1
-            continue
-
+    for po in body.purchase_orders:
         item_id = item_map[po.item_external_id]
         location_id = loc_map[po.location_external_id]
         active = po.status != "cancelled"
@@ -772,20 +756,10 @@ async def ingest_purchase_orders(
             inserted += 1
 
     logger.info(
-        "ingest.purchase_orders total=%d inserted=%d updated=%d errors=%d",
-        len(body.purchase_orders), inserted, updated, errors_count,
+        "ingest.purchase_orders total=%d inserted=%d updated=%d",
+        len(body.purchase_orders), inserted, updated,
     )
-    total_status = "ok" if errors_count == 0 else ("partial" if (inserted + updated) > 0 else "error")
-    return IngestResponse(
-        status=total_status,
-        summary=IngestSummary(
-            total=len(body.purchase_orders),
-            inserted=inserted,
-            updated=updated,
-            errors=errors_count,
-        ),
-        results=results,
-    )
+    return _ok(inserted, updated, len(body.purchase_orders), results)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -816,9 +790,11 @@ async def ingest_forecast_demand(
     db: psycopg.Connection = Depends(get_db),
     _token: str = Depends(require_auth),
 ) -> IngestResponse:
-    """Upsert ForecastDemand nodes. Keyed by (item, location, bucket_date, time_grain, scenario)."""
+    """Upsert ForecastDemand nodes. Keyed by (item, location, bucket_date, time_grain, scenario).
+    All-or-nothing: any validation or FK error → HTTP 422.
+    """
+    # W-01: validate ALL rows (structural + FK) before any write
     errors: list[dict] = []
-    valid_forecasts: list[ForecastRow] = []
 
     for i, fc in enumerate(body.forecasts):
         row_errs = []
@@ -830,13 +806,36 @@ async def ingest_forecast_demand(
                 "bucket_date": str(fc.bucket_date),
                 "row": i,
                 "errors": row_errs,
-                "action": "error",
             })
-        else:
-            valid_forecasts.append(fc)
 
     if errors:
-        return _error_response(len(body.forecasts), errors)
+        _raise_422(errors)
+
+    # FK resolution
+    item_ext_ids = list({fc.item_external_id for fc in body.forecasts})
+    loc_ext_ids = list({fc.location_external_id for fc in body.forecasts})
+
+    item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
+    loc_map = _batch_existing(db, "locations", "external_id", "location_id", loc_ext_ids)
+
+    fk_errors: list[dict] = []
+    for i, fc in enumerate(body.forecasts):
+        row_errs = []
+        if fc.item_external_id not in item_map:
+            row_errs.append(f"item_external_id '{fc.item_external_id}' not found in DB")
+        if fc.location_external_id not in loc_map:
+            row_errs.append(f"location_external_id '{fc.location_external_id}' not found in DB")
+        if row_errs:
+            fk_errors.append({
+                "item_external_id": fc.item_external_id,
+                "bucket_date": str(fc.bucket_date),
+                "row": i,
+                "errors": row_errs,
+            })
+
+    # W-01+W-02: FK errors → 422, nothing persisted
+    if fk_errors:
+        _raise_422(fk_errors)
 
     if body.dry_run:
         return IngestResponse(
@@ -844,37 +843,14 @@ async def ingest_forecast_demand(
             summary=IngestSummary(total=len(body.forecasts), inserted=0, updated=0, errors=0),
             results=[
                 {"item_external_id": fc.item_external_id, "bucket_date": str(fc.bucket_date), "action": "dry_run"}
-                for fc in valid_forecasts
+                for fc in body.forecasts
             ],
         )
 
-    item_ext_ids = list({fc.item_external_id for fc in valid_forecasts})
-    loc_ext_ids = list({fc.location_external_id for fc in valid_forecasts})
-
-    item_map = _batch_existing(db, "items", "external_id", "item_id", item_ext_ids)
-    loc_map = _batch_existing(db, "locations", "external_id", "location_id", loc_ext_ids)
-
     results: list[dict] = []
-    inserted = updated = errors_count = 0
+    inserted = updated = 0
 
-    for i, fc in enumerate(valid_forecasts):
-        row_errs = []
-        if fc.item_external_id not in item_map:
-            row_errs.append(f"item_external_id '{fc.item_external_id}' not found in DB")
-        if fc.location_external_id not in loc_map:
-            row_errs.append(f"location_external_id '{fc.location_external_id}' not found in DB")
-
-        if row_errs:
-            results.append({
-                "item_external_id": fc.item_external_id,
-                "bucket_date": str(fc.bucket_date),
-                "row": i,
-                "errors": row_errs,
-                "action": "error",
-            })
-            errors_count += 1
-            continue
-
+    for fc in body.forecasts:
         item_id = item_map[fc.item_external_id]
         location_id = loc_map[fc.location_external_id]
 
@@ -928,17 +904,7 @@ async def ingest_forecast_demand(
             inserted += 1
 
     logger.info(
-        "ingest.forecast_demand total=%d inserted=%d updated=%d errors=%d",
-        len(body.forecasts), inserted, updated, errors_count,
+        "ingest.forecast_demand total=%d inserted=%d updated=%d",
+        len(body.forecasts), inserted, updated,
     )
-    total_status = "ok" if errors_count == 0 else ("partial" if (inserted + updated) > 0 else "error")
-    return IngestResponse(
-        status=total_status,
-        summary=IngestSummary(
-            total=len(body.forecasts),
-            inserted=inserted,
-            updated=updated,
-            errors=errors_count,
-        ),
-        results=results,
-    )
+    return _ok(inserted, updated, len(body.forecasts), results)

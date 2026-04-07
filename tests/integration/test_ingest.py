@@ -132,10 +132,12 @@ def test_ingest_items_invalid_type(ingest_client, auth):
         json={"items": [{"external_id": uid("SKU-BAD"), "name": "Bad", "item_type": "invalid_type", "uom": "EA", "status": "active"}]},
         headers=auth,
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "error"
-    assert data["summary"]["errors"] == 1
+    # W-01/W-02: validation errors now return HTTP 422
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert len(detail) == 1
+    assert "item_type" in detail[0]["errors"][0]
 
 
 @requires_db
@@ -193,8 +195,11 @@ def test_ingest_locations_invalid_type(ingest_client, auth):
         json={"locations": [{"external_id": uid("DC-BAD"), "name": "Bad", "location_type": "invalid"}]},
         headers=auth,
     )
-    assert resp.status_code == 200
-    assert resp.json()["summary"]["errors"] == 1
+    # W-01/W-02: validation errors now return HTTP 422
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert len(detail) == 1
 
 
 @requires_db
@@ -250,7 +255,9 @@ def test_ingest_suppliers_invalid_reliability(ingest_client, auth):
         json={"suppliers": [{"external_id": uid("VENDOR-BAD"), "name": "Bad", "reliability_score": 1.5, "status": "active"}]},
         headers=auth,
     )
-    assert resp.json()["summary"]["errors"] == 1
+    # W-01/W-02: validation errors now return HTTP 422
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)
 
 
 @requires_db
@@ -260,7 +267,35 @@ def test_ingest_suppliers_invalid_status(ingest_client, auth):
         json={"suppliers": [{"external_id": uid("VENDOR-BAD2"), "name": "Bad", "status": "unknown"}]},
         headers=auth,
     )
-    assert resp.json()["summary"]["errors"] == 1
+    # W-01/W-02: validation errors now return HTTP 422
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)
+
+
+@requires_db
+def test_ingest_suppliers_invalid_lead_time(ingest_client, auth):
+    """W-06: lead_time_days <= 0 must return 422 (Pydantic gt=0 constraint)."""
+    resp = ingest_client.post(
+        "/v1/ingest/suppliers",
+        json={"suppliers": [{"external_id": uid("VENDOR-LT0"), "name": "Bad LT", "lead_time_days": 0, "status": "active"}]},
+        headers=auth,
+    )
+    assert resp.status_code == 422
+
+
+@requires_db
+def test_ingest_supplier_items_invalid_lead_time(ingest_client, auth):
+    """W-06: lead_time_days <= 0 on supplier_items must return 422."""
+    resp = ingest_client.post(
+        "/v1/ingest/supplier-items",
+        json={
+            "supplier_items": [
+                {"supplier_external_id": "ANY", "item_external_id": "ANY", "lead_time_days": -1}
+            ]
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 422
 
 
 @requires_db
@@ -329,19 +364,31 @@ def test_ingest_supplier_items_fk_missing(ingest_client, auth):
         },
         headers=auth,
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["summary"]["errors"] == 1
-    assert data["results"][0]["action"] == "error"
+    # W-02: FK errors now return HTTP 422
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert len(detail) == 1
 
 
 @requires_db
 def test_ingest_supplier_items_dry_run(ingest_client, auth):
+    # Setup: ensure FK entities exist so dry_run passes FK check
+    ingest_client.post(
+        "/v1/ingest/items",
+        json={"items": [{"external_id": uid("SI-DRY-ITEM"), "name": "SI Dry Item", "item_type": "component", "uom": "EA", "status": "active"}]},
+        headers=auth,
+    )
+    ingest_client.post(
+        "/v1/ingest/suppliers",
+        json={"suppliers": [{"external_id": uid("SI-DRY-VENDOR"), "name": "SI Dry Vendor", "status": "active"}]},
+        headers=auth,
+    )
     resp = ingest_client.post(
         "/v1/ingest/supplier-items",
         json={
             "supplier_items": [
-                {"supplier_external_id": "X", "item_external_id": "Y", "lead_time_days": 1}
+                {"supplier_external_id": uid("SI-DRY-VENDOR"), "item_external_id": uid("SI-DRY-ITEM"), "lead_time_days": 1}
             ],
             "dry_run": True,
         },
@@ -424,8 +471,47 @@ def test_ingest_on_hand_fk_missing(ingest_client, auth):
         json={"on_hand": [{"item_external_id": "MISSING", "location_external_id": "MISSING", "quantity": 1.0, "uom": "EA", "as_of_date": "2026-04-07"}]},
         headers=auth,
     )
+    # W-02: FK errors now return HTTP 422
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)
+
+
+@requires_db
+def test_ingest_on_hand_dry_run(ingest_client, auth):
+    """W-04: dry_run for on-hand must return dry_run status with no DB writes."""
+    # Setup: ensure item + location exist
+    ingest_client.post(
+        "/v1/ingest/items",
+        json={"items": [{"external_id": uid("OH-DRY-ITEM"), "name": "OH Dry Item", "item_type": "finished_good", "uom": "EA", "status": "active"}]},
+        headers=auth,
+    )
+    ingest_client.post(
+        "/v1/ingest/locations",
+        json={"locations": [{"external_id": uid("OH-DRY-LOC"), "name": "OH Dry Loc", "location_type": "dc"}]},
+        headers=auth,
+    )
+    resp = ingest_client.post(
+        "/v1/ingest/on-hand",
+        json={
+            "on_hand": [
+                {
+                    "item_external_id": uid("OH-DRY-ITEM"),
+                    "location_external_id": uid("OH-DRY-LOC"),
+                    "quantity": 999.0,
+                    "uom": "EA",
+                    "as_of_date": "2026-04-07",
+                }
+            ],
+            "dry_run": True,
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 200
     data = resp.json()
-    assert data["summary"]["errors"] == 1
+    assert data["status"] == "dry_run"
+    assert data["summary"]["inserted"] == 0
+    assert data["summary"]["updated"] == 0
+    assert data["results"][0]["action"] == "dry_run"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -514,7 +600,57 @@ def test_ingest_purchase_orders_fk_missing(ingest_client, auth):
         json={"purchase_orders": [{"external_id": "PO-MISS", "item_external_id": "MISS", "location_external_id": "MISS", "supplier_external_id": "MISS", "quantity": 1.0, "uom": "EA", "expected_delivery_date": "2026-04-20", "status": "confirmed"}]},
         headers=auth,
     )
-    assert resp.json()["summary"]["errors"] == 1
+    # W-02: FK errors now return HTTP 422
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)
+
+
+@requires_db
+def test_ingest_purchase_orders_dry_run(ingest_client, auth):
+    """W-04: dry_run for purchase-orders must return dry_run status with no DB writes."""
+    # Setup: ensure FK entities exist
+    ingest_client.post(
+        "/v1/ingest/items",
+        json={"items": [{"external_id": uid("PO-DRY-ITEM"), "name": "PO Dry Item", "item_type": "finished_good", "uom": "EA", "status": "active"}]},
+        headers=auth,
+    )
+    ingest_client.post(
+        "/v1/ingest/locations",
+        json={"locations": [{"external_id": uid("PO-DRY-LOC"), "name": "PO Dry Loc", "location_type": "dc"}]},
+        headers=auth,
+    )
+    ingest_client.post(
+        "/v1/ingest/suppliers",
+        json={"suppliers": [{"external_id": uid("PO-DRY-VENDOR"), "name": "PO Dry Vendor", "status": "active"}]},
+        headers=auth,
+    )
+    po_ext_id = uid("PO-DRY-2026-001")
+    resp = ingest_client.post(
+        "/v1/ingest/purchase-orders",
+        json={
+            "purchase_orders": [
+                {
+                    "external_id": po_ext_id,
+                    "item_external_id": uid("PO-DRY-ITEM"),
+                    "location_external_id": uid("PO-DRY-LOC"),
+                    "supplier_external_id": uid("PO-DRY-VENDOR"),
+                    "quantity": 100.0,
+                    "uom": "EA",
+                    "expected_delivery_date": "2026-05-01",
+                    "status": "confirmed",
+                }
+            ],
+            "dry_run": True,
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "dry_run"
+    assert data["summary"]["inserted"] == 0
+    assert data["summary"]["updated"] == 0
+    assert data["results"][0]["action"] == "dry_run"
+    assert data["results"][0]["external_id"] == po_ext_id
 
 
 # ─────────────────────────────────────────────────────────────
@@ -591,7 +727,9 @@ def test_ingest_forecast_demand_invalid_grain(ingest_client, auth):
         json={"forecasts": [{"item_external_id": "X", "location_external_id": "Y", "quantity": 1.0, "bucket_date": "2026-04-14", "time_grain": "invalid_grain"}]},
         headers=auth,
     )
-    assert resp.json()["summary"]["errors"] == 1
+    # W-01/W-02: validation errors now return HTTP 422
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)
 
 
 @requires_db
