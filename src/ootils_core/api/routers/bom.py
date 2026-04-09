@@ -125,7 +125,7 @@ def _get_active_bom(db: psycopg.Connection, parent_item_id: UUID) -> dict | None
 
 
 def _get_bom_lines(db: psycopg.Connection, bom_id: UUID) -> list[dict]:
-    """Return all bom_lines for a given bom_id, with external_id for each component."""
+    """Return all active bom_lines for a given bom_id, with external_id for each component."""
     rows = db.execute(
         """
         SELECT bl.line_id, bl.component_item_id, bl.quantity_per, bl.uom,
@@ -133,6 +133,7 @@ def _get_bom_lines(db: psycopg.Connection, bom_id: UUID) -> list[dict]:
         FROM bom_lines bl
         JOIN items i ON i.item_id = bl.component_item_id
         WHERE bl.bom_id = %s
+          AND bl.active = TRUE
         """,
         (bom_id,),
     ).fetchall()
@@ -198,6 +199,7 @@ def _detect_cycle(
         FROM bom_headers bh
         JOIN bom_lines bl ON bl.bom_id = bh.bom_id
         WHERE bh.status = 'active'
+          AND bl.active = TRUE
         """
     ).fetchall()
 
@@ -243,6 +245,7 @@ def _recalculate_llc(db: psycopg.Connection, affected_item_ids: list[UUID]) -> i
         FROM bom_headers bh
         JOIN bom_lines bl ON bl.bom_id = bh.bom_id
         WHERE bh.status = 'active'
+          AND bl.active = TRUE
         """
     ).fetchall()
 
@@ -394,14 +397,39 @@ async def ingest_bom(
     for comp, comp_id in zip(body.components, component_ids):
         db.execute(
             """
-            INSERT INTO bom_lines (bom_id, component_item_id, quantity_per, uom, scrap_factor)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO bom_lines (bom_id, component_item_id, quantity_per, uom, scrap_factor, active, updated_at)
+            VALUES (%s, %s, %s, %s, %s, TRUE, now())
             ON CONFLICT (bom_id, component_item_id) DO UPDATE
                 SET quantity_per  = EXCLUDED.quantity_per,
                     uom           = EXCLUDED.uom,
-                    scrap_factor  = EXCLUDED.scrap_factor
+                    scrap_factor  = EXCLUDED.scrap_factor,
+                    active        = TRUE,
+                    updated_at    = now()
             """,
             (bom_id, comp_id, comp.quantity_per, comp.uom, comp.scrap_factor),
+        )
+
+    # 6b. Soft-delete components removed from the payload
+    if component_ids:
+        db.execute(
+            """
+            UPDATE bom_lines
+            SET active = FALSE, updated_at = now()
+            WHERE bom_id = %s
+              AND active = TRUE
+              AND component_item_id != ALL(%s::uuid[])
+            """,
+            (bom_id, component_ids),
+        )
+    else:
+        # No components in new payload: deactivate all existing lines
+        db.execute(
+            """
+            UPDATE bom_lines
+            SET active = FALSE, updated_at = now()
+            WHERE bom_id = %s AND active = TRUE
+            """,
+            (bom_id,),
         )
 
     # 7. Recalculate LLC

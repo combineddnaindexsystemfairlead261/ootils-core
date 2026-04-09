@@ -50,17 +50,21 @@ class IngestResponse(BaseModel):
     status: str
     summary: IngestSummary
     results: list[dict]
+    batch_id: Optional[UUID] = None
+    dq_status: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
 
-def _ok(inserted: int, updated: int, total: int, results: list[dict]) -> IngestResponse:
+def _ok(inserted: int, updated: int, total: int, results: list[dict], batch_id: UUID | None = None, dq_status: str | None = None) -> IngestResponse:
     return IngestResponse(
         status="ok",
         summary=IngestSummary(total=total, inserted=inserted, updated=updated, errors=0),
         results=results,
+        batch_id=batch_id,
+        dq_status=dq_status,
     )
 
 
@@ -109,12 +113,26 @@ def _create_ingest_batch(
     return batch_id
 
 
-def _trigger_dq(db: psycopg.Connection, batch_id: UUID) -> None:
-    """Run DQ pipeline on a batch, logging errors but never failing the ingest call."""
+def _trigger_dq(db: psycopg.Connection, batch_id: UUID) -> str:
+    """Run DQ pipeline on a batch. Returns dq_status string, never raises."""
     try:
-        run_dq(db, batch_id)
+        result = run_dq(db, batch_id)
+        return result.batch_dq_status
     except Exception as exc:
         logger.warning("DQ run failed for batch %s: %s", batch_id, exc)
+        return "unknown"
+
+
+def _emit_ingestion_event(db: psycopg.Connection, scenario_id: UUID, node_id: UUID) -> None:
+    """Create an unprocessed ingestion_complete event to trigger recalculation."""
+    from datetime import datetime, timezone
+    db.execute(
+        """
+        INSERT INTO events (event_id, event_type, scenario_id, trigger_node_id, processed, source, created_at)
+        VALUES (%s, 'ingestion_complete', %s, %s, FALSE, 'ingestion', %s)
+        """,
+        (uuid4(), scenario_id, node_id, datetime.now(timezone.utc)),
+    )
 
 
 def _batch_existing(
@@ -159,7 +177,6 @@ class ItemRow(BaseModel):
 
 class IngestItemsRequest(BaseModel):
     items: list[ItemRow]
-    conflict_strategy: str = "upsert"
     dry_run: bool = False
 
 
@@ -222,8 +239,8 @@ async def ingest_items(
 
     logger.info("ingest.items total=%d inserted=%d updated=%d", len(body.items), inserted, updated)
     batch_id = _create_ingest_batch(db, "items", [it.model_dump() for it in body.items])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.items), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.items), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -251,7 +268,6 @@ class LocationRow(BaseModel):
 
 class IngestLocationsRequest(BaseModel):
     locations: list[LocationRow]
-    conflict_strategy: str = "upsert"
     dry_run: bool = False
 
 
@@ -326,8 +342,8 @@ async def ingest_locations(
 
     logger.info("ingest.locations total=%d inserted=%d updated=%d", len(body.locations), inserted, updated)
     batch_id = _create_ingest_batch(db, "locations", [loc.model_dump() for loc in body.locations])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.locations), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.locations), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -358,7 +374,6 @@ class SupplierRow(BaseModel):
 
 class IngestSuppliersRequest(BaseModel):
     suppliers: list[SupplierRow]
-    conflict_strategy: str = "upsert"
     dry_run: bool = False
 
 
@@ -421,8 +436,8 @@ async def ingest_suppliers(
 
     logger.info("ingest.suppliers total=%d inserted=%d updated=%d", len(body.suppliers), inserted, updated)
     batch_id = _create_ingest_batch(db, "suppliers", [sup.model_dump() for sup in body.suppliers])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.suppliers), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.suppliers), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -442,7 +457,6 @@ class SupplierItemRow(BaseModel):
 
 class IngestSupplierItemsRequest(BaseModel):
     supplier_items: list[SupplierItemRow]
-    conflict_strategy: str = "upsert"
     dry_run: bool = False
 
 
@@ -547,8 +561,8 @@ async def ingest_supplier_items(
         len(body.supplier_items), inserted, updated,
     )
     batch_id = _create_ingest_batch(db, "supplier_items", [si.model_dump() for si in body.supplier_items])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.supplier_items), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.supplier_items), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -633,18 +647,20 @@ async def ingest_on_hand(
         ).fetchone()
 
         if existing:
+            node_id = existing["node_id"]
             db.execute(
                 """
                 UPDATE nodes
-                SET quantity = %s, qty_uom = %s, time_ref = %s, updated_at = now()
+                SET quantity = %s, qty_uom = %s, time_ref = %s, is_dirty = TRUE, updated_at = now()
                 WHERE node_id = %s
                 """,
-                (row.quantity, row.uom, row.as_of_date, existing["node_id"]),
+                (row.quantity, row.uom, row.as_of_date, node_id),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, node_id)
             results.append({
                 "item_external_id": row.item_external_id,
                 "location_external_id": row.location_external_id,
-                "node_id": str(existing["node_id"]),
+                "node_id": str(node_id),
                 "action": "updated",
             })
             updated += 1
@@ -654,12 +670,13 @@ async def ingest_on_hand(
                 """
                 INSERT INTO nodes
                     (node_id, node_type, scenario_id, item_id, location_id,
-                     quantity, qty_uom, time_grain, time_ref, active)
-                VALUES (%s, 'OnHandSupply', %s, %s, %s, %s, %s, 'timeless', %s, TRUE)
+                     quantity, qty_uom, time_grain, time_ref, is_dirty, active)
+                VALUES (%s, 'OnHandSupply', %s, %s, %s, %s, %s, 'timeless', %s, TRUE, TRUE)
                 """,
                 (node_id, BASELINE_SCENARIO_ID, item_id, location_id,
                  row.quantity, row.uom, row.as_of_date),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, node_id)
             results.append({
                 "item_external_id": row.item_external_id,
                 "location_external_id": row.location_external_id,
@@ -673,8 +690,8 @@ async def ingest_on_hand(
         len(body.on_hand), inserted, updated,
     )
     batch_id = _create_ingest_batch(db, "on_hand", [r.model_dump() for r in body.on_hand])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.on_hand), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.on_hand), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -771,11 +788,12 @@ async def ingest_purchase_orders(
                 """
                 UPDATE nodes
                 SET quantity = %s, qty_uom = %s, time_ref = %s,
-                    active = %s, updated_at = now()
+                    active = %s, is_dirty = TRUE, updated_at = now()
                 WHERE node_id = %s
                 """,
                 (po.quantity, po.uom, po.expected_delivery_date, active, node_id),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, node_id)
             results.append({"external_id": po.external_id, "node_id": str(node_id), "action": "updated"})
             updated += 1
         else:
@@ -784,12 +802,13 @@ async def ingest_purchase_orders(
                 """
                 INSERT INTO nodes
                     (node_id, node_type, scenario_id, item_id, location_id,
-                     quantity, qty_uom, time_grain, time_ref, active)
-                VALUES (%s, 'PurchaseOrderSupply', %s, %s, %s, %s, %s, 'exact_date', %s, %s)
+                     quantity, qty_uom, time_grain, time_ref, is_dirty, active)
+                VALUES (%s, 'PurchaseOrderSupply', %s, %s, %s, %s, %s, 'exact_date', %s, TRUE, %s)
                 """,
                 (node_id, BASELINE_SCENARIO_ID, item_id, location_id,
                  po.quantity, po.uom, po.expected_delivery_date, active),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, node_id)
             # Register external reference
             db.execute(
                 """
@@ -809,8 +828,8 @@ async def ingest_purchase_orders(
         len(body.purchase_orders), inserted, updated,
     )
     batch_id = _create_ingest_batch(db, "purchase_orders", [po.model_dump() for po in body.purchase_orders])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.purchase_orders), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.purchase_orders), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -928,18 +947,20 @@ async def ingest_forecast_demand(
         ).fetchone()
 
         if existing:
+            fc_node_id = existing["node_id"]
             db.execute(
                 """
                 UPDATE nodes
-                SET quantity = %s, updated_at = now()
+                SET quantity = %s, is_dirty = TRUE, updated_at = now()
                 WHERE node_id = %s
                 """,
-                (fc.quantity, existing["node_id"]),
+                (fc.quantity, fc_node_id),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, fc_node_id)
             results.append({
                 "item_external_id": fc.item_external_id,
                 "bucket_date": str(fc.bucket_date),
-                "node_id": str(existing["node_id"]),
+                "node_id": str(fc_node_id),
                 "action": "updated",
             })
             updated += 1
@@ -949,12 +970,13 @@ async def ingest_forecast_demand(
                 """
                 INSERT INTO nodes
                     (node_id, node_type, scenario_id, item_id, location_id,
-                     quantity, time_grain, time_ref, active)
-                VALUES (%s, 'ForecastDemand', %s, %s, %s, %s, %s, %s, TRUE)
+                     quantity, time_grain, time_ref, is_dirty, active)
+                VALUES (%s, 'ForecastDemand', %s, %s, %s, %s, %s, %s, TRUE, TRUE)
                 """,
                 (node_id, BASELINE_SCENARIO_ID, item_id, location_id,
                  fc.quantity, fc.time_grain, fc.bucket_date),
             )
+            _emit_ingestion_event(db, BASELINE_SCENARIO_ID, node_id)
             results.append({
                 "item_external_id": fc.item_external_id,
                 "bucket_date": str(fc.bucket_date),
@@ -968,8 +990,8 @@ async def ingest_forecast_demand(
         len(body.forecasts), inserted, updated,
     )
     batch_id = _create_ingest_batch(db, "forecast_demand", [fc.model_dump() for fc in body.forecasts])
-    _trigger_dq(db, batch_id)
-    return _ok(inserted, updated, len(body.forecasts), results)
+    dq_status = _trigger_dq(db, batch_id)
+    return _ok(inserted, updated, len(body.forecasts), results, batch_id=batch_id, dq_status=dq_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -998,7 +1020,6 @@ class ResourceRow(BaseModel):
 
 class IngestResourcesRequest(BaseModel):
     resources: list[ResourceRow]
-    conflict_strategy: str = "upsert"
     dry_run: bool = False
 
 
