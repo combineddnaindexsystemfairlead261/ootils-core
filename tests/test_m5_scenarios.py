@@ -132,7 +132,7 @@ class TestCreateScenario:
         assert len(insert_calls) >= 1
 
     def test_copies_parent_nodes_to_new_scenario(self):
-        """create_scenario should deep-copy parent nodes with new IDs."""
+        """create_scenario should deep-copy parent nodes (and edges) with new IDs."""
         db = make_mock_db()
         parent_id = BASELINE_ID
         parent_node = make_node_row(
@@ -140,8 +140,15 @@ class TestCreateScenario:
             scenario_id=parent_id,
             closing_stock="100",
         )
-        # Return parent nodes on the first fetchall call
-        db.execute.return_value.fetchall.return_value = [parent_node]
+        # fetchall call order:
+        #   1. SELECT * FROM projection_series  → [] (none to copy)
+        #   2. SELECT * FROM nodes              → [parent_node]
+        #   3. SELECT * FROM edges              → [] (no edges in this test)
+        db.execute.return_value.fetchall.side_effect = [
+            [],             # SELECT * FROM projection_series
+            [parent_node],  # SELECT * FROM nodes
+            [],             # SELECT * FROM edges
+        ]
 
         manager = ScenarioManager()
         scenario = manager.create_scenario(
