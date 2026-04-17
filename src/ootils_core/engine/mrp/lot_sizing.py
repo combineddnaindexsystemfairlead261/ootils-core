@@ -489,7 +489,7 @@ class LotSizingEngine:
                 "lead_time_total_days": row["lead_time_total_days"] or 0,
                 "frozen_time_fence_days": row["frozen_time_fence_days"] or 7,
                 "slashed_time_fence_days": row["slashed_time_fence_days"] or 30,
-                "forecast_consumption_strategy": row["forecast_consumption_strategy"] or "max_only",
+                "forecast_consumption_strategy": row["forecast_consumption_strategy"] or "MAX",
                 "consumption_window_days": row["consumption_window_days"] or 7,
                 "planning_horizon_days": row["planning_horizon_days"] or 90,
             }
@@ -507,7 +507,7 @@ class LotSizingEngine:
             "lead_time_total_days": 0,
             "frozen_time_fence_days": 7,
             "slashed_time_fence_days": 30,
-            "forecast_consumption_strategy": "max_only",
+            "forecast_consumption_strategy": "MAX",
             "consumption_window_days": 7,
             "planning_horizon_days": 90,
         }
