@@ -223,7 +223,7 @@ class GraphIntegration:
                     trigger_node_id, processed, source, created_at
                 ) VALUES (
                     %s, 'ingestion_complete', %s,
-                    %s, FALSE, 'mrp_engine', %s
+                    %s, FALSE, 'engine', %s
                 )
                 """,
                 (event_id, self.scenario_id, node_id, now),
@@ -242,7 +242,9 @@ class GraphIntegration:
     ) -> int:
         """Persist MRP action messages for exceptions.
 
-        Uses the actual mrp_action_messages table schema (column = run_id).
+        Legacy DB compatibility:
+        resolve a real location_id when records are scenario-wide and do not
+        carry one explicitly.
         """
         messages_created = 0
 
@@ -251,7 +253,36 @@ class GraphIntegration:
                 continue
 
             message_type, priority, description = self._classify_shortage(record)
-            loc_id = record.location_id or UUID("00000000-0000-0000-0000-000000000001")
+            loc_id = record.location_id
+
+            if loc_id is None:
+                row = self.db.execute(
+                    """
+                    SELECT location_id
+                    FROM nodes
+                    WHERE item_id = %s
+                      AND scenario_id = %s
+                      AND location_id IS NOT NULL
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    """,
+                    (record.item_id, self.scenario_id),
+                ).fetchone()
+                if row:
+                    loc_id = row["location_id"]
+                else:
+                    row = self.db.execute(
+                        "SELECT location_id FROM locations ORDER BY location_id LIMIT 1"
+                    ).fetchone()
+                    if row:
+                        loc_id = row["location_id"]
+
+            if loc_id is None:
+                logger.warning(
+                    "Skipping action message for item %s because no valid location_id was found",
+                    record.item_id,
+                )
+                continue
 
             self.db.execute(
                 """

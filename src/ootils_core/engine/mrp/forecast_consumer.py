@@ -599,9 +599,29 @@ class ForecastConsumer:
         location_id: Optional[UUID],
         consumed_buckets: List[ConsumedBucket],
     ) -> int:
-        """Log consumption results to forecast_consumption_log."""
+        """Log consumption results to forecast_consumption_log.
+
+        Legacy DB compatibility:
+        - older schemas require location_id NOT NULL
+        - older check constraint accepts only legacy strategy names
+        """
+        if location_id is None:
+            logger.warning(
+                "Skipping forecast_consumption_log write for item %s because location_id is NULL",
+                item_id,
+            )
+            return 0
+
+        strategy_aliases = {
+            "MAX": "max_only",
+            "FORECAST_ONLY": "max_only",
+            "ORDERS_ONLY": "consume_forward",
+            "PRIORITY": "consume_forward",
+        }
+
         logged = 0
         for bucket in consumed_buckets:
+            db_strategy = strategy_aliases.get(bucket.strategy, bucket.strategy)
             self.db.execute("""
                 INSERT INTO forecast_consumption_log (
                     run_id, item_id, location_id,
@@ -626,11 +646,11 @@ class ForecastConsumer:
                 bucket.period_end,
                 bucket.original_forecast,
                 bucket.customer_orders,
-                bucket.consumed_forecast,   # consumed_qty → consumed_forecast
+                bucket.consumed_forecast,
                 bucket.remaining_forecast,
-                Decimal("0"),                # carry_forward (not used in new model)
-                Decimal("0"),                # carry_backward (not used in new model)
-                bucket.strategy,
+                Decimal("0"),
+                Decimal("0"),
+                db_strategy,
                 bucket.net_demand,
             ))
             logged += 1
