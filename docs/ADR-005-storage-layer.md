@@ -36,6 +36,10 @@ This ADR answers the original proof-stage question set:
 > Status note, the live runtime is PostgreSQL via psycopg3. The SQLite-first sections
 > below describe an earlier proof-stage design and should not be read as the current
 > production or demo runtime architecture.
+>
+> JSONB note: the live runtime still avoids JSONB for core planning structures. Limited
+> exceptions are allowed for diagnostic or staging payloads whose shape is intentionally
+> dynamic, such as `dq_agent_runs.summary` and staging-layer raw import payloads.
 
 ## Decision 1: Persistence Technology
 
