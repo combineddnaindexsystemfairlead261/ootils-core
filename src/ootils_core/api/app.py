@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ootils_core.api.auth import _expected_token
+from ootils_core.api.dependencies import _get_ootils_db, get_db
 from ootils_core.api.routers import bom, calc, calendars, dq, events, explain, ghosts, graph, ingest, issues, mrp, planning_params, projection, rccp, scenarios, simulate
 from ootils_core.api.routers.graph import nodes_router
 
@@ -39,6 +42,59 @@ for _spec_path in _SPEC_CANDIDATES:
 API_VERSION = "1.0.0"
 
 _INGEST_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _correlation_id_from_request(request: Request) -> str:
+    raw = request.headers.get("X-Correlation-ID", "").strip()
+    if raw:
+        return raw[:128]
+    return f"req_{uuid4().hex}"
+
+
+def _should_audit_request(request: Request) -> bool:
+    path = request.url.path
+    if path != "/health" and not path.startswith("/v1/"):
+        return False
+    if request.app.dependency_overrides.get(get_db) is not None:
+        return False
+    return True
+
+
+def _log_api_request(request: Request, status_code: int, latency_ms: int) -> None:
+    if not _should_audit_request(request):
+        return
+
+    client_ip = request.client.host if request.client else None
+    token_prefix = getattr(request.state, "client_id", None)
+    correlation_id = getattr(request.state, "correlation_id", None)
+
+    try:
+        db_handle = _get_ootils_db()
+        with db_handle.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_request_log (
+                    correlation_id, token_prefix, method, path,
+                    status_code, latency_ms, client_ip
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    correlation_id,
+                    token_prefix,
+                    request.method,
+                    request.url.path,
+                    status_code,
+                    latency_ms,
+                    client_ip,
+                ),
+            )
+    except Exception as exc:
+        logger.warning(
+            "audit.log_failed path=%s status=%s error=%s",
+            request.url.path,
+            status_code,
+            exc,
+        )
 
 
 class IngestPayloadSizeLimitMiddleware(BaseHTTPMiddleware):
@@ -125,6 +181,27 @@ def create_app() -> FastAPI:
 
     # Payload size limit middleware for ingest routes
     application.add_middleware(IngestPayloadSizeLimitMiddleware)
+
+    @application.middleware("http")
+    async def request_context_middleware(request: Request, call_next):
+        correlation_id = _correlation_id_from_request(request)
+        request.state.correlation_id = correlation_id
+        started = time.perf_counter()
+
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            logger.exception("Unhandled exception: %s", exc)
+            response = JSONResponse(
+                status_code=500,
+                content={"error": "internal_error", "message": "An internal error occurred.", "status": 500},
+            )
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-API-Version"] = API_VERSION
+        _log_api_request(request, response.status_code, latency_ms)
+        return response
 
     # Health endpoint (no auth)
     @application.get("/health", tags=["health"], include_in_schema=True)

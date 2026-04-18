@@ -39,9 +39,11 @@ from ootils_core.api.routers.ingest import (
     _emit_ingestion_event,
     _ensure_projection_series,
     _ok,
+    _request_hash,
     _raise_422,
     _trigger_dq,
     _wire_node_to_pi,
+    IngestItemsRequest,
     ItemRow,
 )
 
@@ -95,6 +97,16 @@ class FakeDB:
     def __init__(self, handler=None):
         self.handler = handler or (lambda sql, params: FakeCursor())
         self.calls: list[tuple[str, tuple]] = []
+
+    class _TransactionCM:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def transaction(self):
+        return self._TransactionCM()
 
     def execute(self, sql, params=None):
         rendered_sql = sql
@@ -448,6 +460,87 @@ def test_ingest_items_dq_failure_logged_not_raised():
         )
     assert resp.status_code == 200
     assert resp.json()["dq_status"] == "unknown"
+
+
+def test_health_includes_correlation_and_version_headers():
+    client = make_client(FakeDB())
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.headers["X-API-Version"] == "1.0.0"
+    assert resp.headers["X-Correlation-ID"].startswith("req_")
+
+
+def test_ingest_items_echoes_correlation_id_header():
+    db = _passing_dq_db()
+    client = make_client(db)
+    with patch.object(ingest_module, "run_dq", return_value=FakeDQResult()):
+        resp = client.post(
+            "/v1/ingest/items",
+            json={"items": [{"external_id": "SKU-001", "name": "Pump"}]},
+            headers={**AUTH_HEADERS, "X-Correlation-ID": "corr-123"},
+        )
+    assert resp.status_code == 200
+    assert resp.headers["X-Correlation-ID"] == "corr-123"
+
+
+def test_ingest_items_idempotent_replay_returns_stored_response():
+    body = IngestItemsRequest(items=[ItemRow(external_id="SKU-001", name="Pump")])
+    stored = _ok(
+        1,
+        0,
+        1,
+        [{"external_id": "SKU-001", "item_id": str(uuid4()), "action": "inserted"}],
+        batch_id=uuid4(),
+        dq_status="passed",
+    )
+
+    def handler(sql, params):
+        if "SELECT entity_type, request_hash, response_json" in sql:
+            return FakeCursor(
+                fetchone_value={
+                    "entity_type": "items",
+                    "request_hash": _request_hash(body),
+                    "response_json": stored.model_dump_json(),
+                }
+            )
+        return FakeCursor()
+
+    db = FakeDB(handler=handler)
+    client = make_client(db)
+    resp = client.post(
+        "/v1/ingest/items",
+        json={"items": [{"external_id": "SKU-001", "name": "Pump"}]},
+        headers={**AUTH_HEADERS, "Idempotency-Key": "idem-1"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Idempotent-Replay"] == "true"
+    assert resp.json()["batch_id"] == str(stored.batch_id)
+    assert not any("INSERT INTO items" in sql for sql, _ in db.calls)
+
+
+def test_ingest_items_idempotency_conflict_on_different_payload():
+    original_body = IngestItemsRequest(items=[ItemRow(external_id="SKU-001", name="Pump")])
+
+    def handler(sql, params):
+        if "SELECT entity_type, request_hash, response_json" in sql:
+            return FakeCursor(
+                fetchone_value={
+                    "entity_type": "items",
+                    "request_hash": _request_hash(original_body),
+                    "response_json": None,
+                }
+            )
+        return FakeCursor()
+
+    db = FakeDB(handler=handler)
+    client = make_client(db)
+    resp = client.post(
+        "/v1/ingest/items",
+        json={"items": [{"external_id": "SKU-001", "name": "Pump v2"}]},
+        headers={**AUTH_HEADERS, "Idempotency-Key": "idem-1"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "idempotency.conflict"
 
 
 # ─────────────────────────────────────────────────────────────

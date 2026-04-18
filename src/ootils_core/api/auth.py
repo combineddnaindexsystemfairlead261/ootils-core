@@ -11,7 +11,7 @@ import hmac
 import logging
 import os
 
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ def _expected_token() -> str:
 
 async def require_auth(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
+    request: Request = None,
 ) -> str:
     """
     FastAPI dependency — validates Bearer token.
@@ -59,5 +60,8 @@ async def require_auth(
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if request is not None:
+        request.state.client_id = "global_token"
 
     return credentials.credentials
