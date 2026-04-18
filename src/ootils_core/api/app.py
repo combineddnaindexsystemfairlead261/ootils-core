@@ -21,11 +21,20 @@ from ootils_core.api.routers.graph import nodes_router
 
 logger = logging.getLogger(__name__)
 
-# Load description from spec file if available
-_SPEC_PATH = Path(__file__).parents[4] / "docs" / "api-spec.md"
-_DESCRIPTION = _SPEC_PATH.read_text(encoding="utf-8") if _SPEC_PATH.exists() else (
-    "Ootils Core REST API — supply chain planning engine."
-)
+# Load description from the workspace operational spec first, then fall back to
+# the repo-local legacy API spec if the workspace spec is absent.
+_WORKSPACE_ROOT = Path(__file__).parents[4]
+_REPO_ROOT = Path(__file__).parents[3]
+_SPEC_CANDIDATES = [
+    _WORKSPACE_ROOT / "specs" / "SPEC-INTERFACES.md",
+    _REPO_ROOT / "docs" / "api-spec.md",
+]
+
+_DESCRIPTION = "Ootils Core REST API — supply chain planning engine."
+for _spec_path in _SPEC_CANDIDATES:
+    if _spec_path.exists():
+        _DESCRIPTION = _spec_path.read_text(encoding="utf-8")
+        break
 
 API_VERSION = "1.0.0"
 
