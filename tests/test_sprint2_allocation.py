@@ -109,7 +109,7 @@ def _make_store_mock(
 
     store.get_edges_from.side_effect = _get_edges_from
 
-    def _get_node(node_id, scenario_id):
+    def _get_node(node_id, scenario_id, for_update=False):
         node = pi_nodes.get(node_id)
         if node is None:
             return None

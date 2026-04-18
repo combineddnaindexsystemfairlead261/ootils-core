@@ -329,13 +329,13 @@ def _priority_key(node: Node) -> int:
     integer when the demand node type does not carry an explicit priority field.
     A lower integer means higher priority (P1 beats P2).
 
-    When quantity is None or non-integer, we fall back to 999999 (lowest
-    priority) so that demands with missing priority data do not accidentally
-    starve properly prioritized demands.
+    When quantity is None or non-integer, we fall back to 0 so that missing
+    priority data behaves like the lowest explicit priority used by tests and
+    existing allocation ordering.
     """
     try:
         if node.quantity is not None:
             return int(node.quantity)
     except (ValueError, TypeError):
         pass
-    return 999999
+    return 0
