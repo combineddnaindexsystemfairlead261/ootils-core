@@ -13,7 +13,6 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 import psycopg
-from psycopg.rows import dict_row
 
 from ootils_core.models import (
     CycleDetectedError,
@@ -73,6 +72,32 @@ class GraphStore:
             ORDER BY bucket_sequence ASC, node_id ASC
             """,
             (series_id,),
+        ).fetchall()
+        return [_row_to_node(r) for r in rows]
+
+    def get_pi_nodes_for_item_location_in_window(
+        self,
+        item_id: UUID,
+        location_id: UUID,
+        scenario_id: UUID,
+        window_start: date,
+        window_end: date,
+    ) -> list[Node]:
+        """Return active PI buckets for an item/location intersecting a time window."""
+        rows = self._conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE scenario_id = %s
+              AND item_id = %s
+              AND location_id = %s
+              AND node_type = 'ProjectedInventory'
+              AND active = TRUE
+              AND time_span_start IS NOT NULL
+              AND time_span_start >= %s
+              AND time_span_start < %s
+            ORDER BY bucket_sequence ASC, node_id ASC
+            """,
+            (scenario_id, item_id, location_id, window_start, window_end),
         ).fetchall()
         return [_row_to_node(r) for r in rows]
 

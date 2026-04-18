@@ -223,6 +223,82 @@ class TestProcessEvent:
         assert tw[0] == date(2025, 1, 1)
         assert tw[1] == date(2025, 3, 1) + timedelta(days=365)
 
+    def test_both_dates_also_marks_impacted_pi_buckets_for_trigger_item_location(self):
+        db = _mock_db()
+        event_id = uuid4()
+        scenario_id = uuid4()
+        trigger = uuid4()
+        run = _make_calc_run(scenario_id=scenario_id)
+        item_id = uuid4()
+        location_id = uuid4()
+        pi_a = uuid4()
+        pi_b = uuid4()
+
+        event_row = {
+            "event_id": str(event_id),
+            "trigger_node_id": str(trigger),
+            "old_date": date(2025, 1, 1),
+            "new_date": date(2025, 3, 1),
+        }
+        scenario_row = {
+            "scenario_id": str(scenario_id),
+            "name": "Test",
+            "baseline_snapshot_id": None,
+            "is_baseline": False,
+        }
+        event_cursor = MagicMock()
+        event_cursor.fetchone.return_value = event_row
+        scenario_cursor = MagicMock()
+        scenario_cursor.fetchone.return_value = scenario_row
+        generic_cursor = MagicMock()
+
+        def execute_side_effect(sql, *args, **kwargs):
+            s = str(sql).lower()
+            if "from events where event_id" in s:
+                return event_cursor
+            if "from scenarios where scenario_id" in s:
+                return scenario_cursor
+            return generic_cursor
+
+        db.execute.side_effect = execute_side_effect
+
+        traversal = MagicMock()
+        traversal.expand_dirty_subgraph.return_value = {trigger}
+        traversal.topological_sort.return_value = [trigger]
+
+        store = MagicMock()
+        store.get_node.side_effect = [
+            Node(node_id=trigger, node_type="PurchaseOrderSupply", scenario_id=scenario_id, item_id=item_id, location_id=location_id),
+            Node(node_id=trigger, node_type="PurchaseOrderSupply", scenario_id=scenario_id, item_id=item_id, location_id=location_id),
+        ]
+        store.get_pi_nodes_for_item_location_in_window.return_value = [
+            Node(node_id=pi_a, node_type="ProjectedInventory", scenario_id=scenario_id, item_id=item_id, location_id=location_id),
+            Node(node_id=pi_b, node_type="ProjectedInventory", scenario_id=scenario_id, item_id=item_id, location_id=location_id),
+        ]
+
+        dirty = MagicMock()
+        calc_run_mgr = MagicMock()
+        calc_run_mgr.start_calc_run.return_value = run
+
+        engine = _make_engine(
+            store=store,
+            traversal=traversal,
+            dirty=dirty,
+            calc_run_mgr=calc_run_mgr,
+        )
+        result = engine.process_event(event_id, scenario_id, db)
+        assert result is run
+
+        dirty_nodes = dirty.mark_dirty.call_args.args[0]
+        assert dirty_nodes == {trigger, pi_a, pi_b}
+        store.get_pi_nodes_for_item_location_in_window.assert_called_once_with(
+            item_id=item_id,
+            location_id=location_id,
+            scenario_id=scenario_id,
+            window_start=date(2025, 1, 1),
+            window_end=date(2025, 3, 1) + timedelta(days=365),
+        )
+
     def test_only_old_date(self):
         db = _mock_db()
         event_id = uuid4()
