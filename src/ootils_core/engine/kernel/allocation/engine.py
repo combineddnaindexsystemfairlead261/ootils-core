@@ -24,7 +24,6 @@ import logging
 from datetime import date as _date_type
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
 from uuid import UUID, uuid4
 
 import psycopg

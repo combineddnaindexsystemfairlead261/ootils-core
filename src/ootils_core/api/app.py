@@ -43,7 +43,7 @@ class IngestPayloadSizeLimitMiddleware(BaseHTTPMiddleware):
                     status_code=413,
                     content={
                         "error": "payload_too_large",
-                        "message": f"Request body exceeds the 10 MB limit for /v1/ingest/* endpoints.",
+                        "message": "Request body exceeds the 10 MB limit for /v1/ingest/* endpoints.",
                         "status": 413,
                     },
                 )
