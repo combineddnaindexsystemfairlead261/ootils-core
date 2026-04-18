@@ -241,7 +241,8 @@ def _finalize_ingest_batch(
 def _trigger_dq(db: psycopg.Connection, batch_id: UUID) -> str:
     """Run DQ pipeline on a batch. Returns dq_status string, never raises."""
     try:
-        result = run_dq(db, batch_id)
+        with db.transaction():
+            result = run_dq(db, batch_id)
         return result.batch_dq_status
     except Exception as exc:
         logger.warning("DQ run failed for batch %s: %s", batch_id, exc)

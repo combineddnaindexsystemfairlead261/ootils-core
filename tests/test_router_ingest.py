@@ -97,16 +97,21 @@ class FakeDB:
     def __init__(self, handler=None):
         self.handler = handler or (lambda sql, params: FakeCursor())
         self.calls: list[tuple[str, tuple]] = []
+        self.transaction_calls = 0
 
     class _TransactionCM:
+        def __init__(self, owner):
+            self.owner = owner
+
         def __enter__(self):
+            self.owner.transaction_calls += 1
             return self
 
         def __exit__(self, exc_type, exc, tb):
             return False
 
     def transaction(self):
-        return self._TransactionCM()
+        return self._TransactionCM(self)
 
     def execute(self, sql, params=None):
         rendered_sql = sql
@@ -192,12 +197,14 @@ def test_trigger_dq_returns_batch_status():
     db = FakeDB()
     with patch.object(ingest_module, "run_dq", return_value=FakeDQResult("passed")):
         assert _trigger_dq(db, uuid4()) == "passed"
+    assert db.transaction_calls == 1
 
 
 def test_trigger_dq_swallows_exceptions_and_returns_unknown():
     db = FakeDB()
     with patch.object(ingest_module, "run_dq", side_effect=RuntimeError("boom")):
         assert _trigger_dq(db, uuid4()) == "unknown"
+    assert db.transaction_calls == 1
 
 
 def test_batch_existing_empty_list_short_circuit():
